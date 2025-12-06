@@ -246,7 +246,7 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                     width="stretch"
                 )
 
-        st.plotly_chart(fig_water, width="stretch")
+
             
         st.subheader(f"{time_horizon}-Year Consolidated Projection")
         fig_owner = go.Figure()
