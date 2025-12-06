@@ -89,39 +89,6 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         c4, c5, c6 = st.columns(3)
         c4.metric("Avg Property DSCR", f"{dscr_agg:.2f}x", help=">1.25x is healthy")
         
-        # Interactive Waterfall Section (Moved up for visibility)
-        st.subheader("Profit Anatomy (Waterfall)")
-        c_w_sel, _ = st.columns([1, 3])
-        water_year = c_w_sel.selectbox("Select Year for Waterfall", range(1, time_horizon + 1))
-        
-        y_data = df_projection[df_projection['Year']==water_year].sum()
-        
-        fig_water = go.Figure(go.Waterfall(
-            name = f"Year {water_year}", orientation = "v",
-            measure = ["relative", "relative", "relative", "relative", "relative", "relative", "total", "relative", "total"],
-            x = ["Revenue", "COGS", "Labor", "Ops", "Rent", "Capex", "Store Net", "+ Prop Net", "Owner CF"],
-            textposition = "outside",
-            y = [
-                y_data['Store_Revenue'], 
-                -y_data['Store_COGS'], 
-                -y_data['Store_Labor'], 
-                -y_data['Store_Ops_Ex'], 
-                -y_data['Store_Rent_Ex'], 
-                -y_data['Capex'], 
-                None, 
-                y_data['Prop_Net'],
-                None 
-            ],
-            connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        ))
-        
-        fig_water.update_layout(
-                title = f"Year {water_year} Profit Flow",
-                showlegend = False,
-                height=400
-        )
-        st.plotly_chart(fig_water, width="stretch", key="chart_waterfall_interactive")
-        
         # Detail Toggle
         show_detail = st.checkbox("Show Detailed Breakdown (P&L)", value=False)
 
@@ -245,6 +212,39 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                     df_view[cols].style.format("${:,.0f}"),
                     width="stretch"
                 )
+
+        # Interactive Waterfall Section (Moved up for visibility)
+        st.subheader("Profit Anatomy (Waterfall)")
+        c_w_sel, _ = st.columns([1, 3])
+        water_year = c_w_sel.selectbox("Select Year for Waterfall", range(1, time_horizon + 1))
+        
+        y_data = df_projection[df_projection['Year']==water_year].sum()
+        
+        fig_water = go.Figure(go.Waterfall(
+            name = f"Year {water_year}", orientation = "v",
+            measure = ["relative", "relative", "relative", "relative", "relative", "relative", "total", "relative", "total"],
+            x = ["Revenue", "COGS", "Labor", "Ops", "Rent", "Capex", "Store Net", "+ Prop Net", "Owner CF"],
+            textposition = "outside",
+            y = [
+                y_data['Store_Revenue'], 
+                -y_data['Store_COGS'], 
+                -y_data['Store_Labor'], 
+                -y_data['Store_Ops_Ex'], 
+                -y_data['Store_Rent_Ex'], 
+                -y_data['Capex'], 
+                None, 
+                y_data['Prop_Net'],
+                None 
+            ],
+            connector = {"line":{"color":"rgb(63, 63, 63)"}},
+        ))
+        
+        fig_water.update_layout(
+                title = f"Year {water_year} Profit Flow",
+                showlegend = False,
+                height=400
+        )
+        st.plotly_chart(fig_water, width="stretch", key="chart_waterfall_interactive")
 
 
             
