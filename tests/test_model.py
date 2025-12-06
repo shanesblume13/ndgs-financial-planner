@@ -166,50 +166,7 @@ class TestFinancialLogic(unittest.TestCase):
         # Store event should NOT affect Prop Net directly
         self.assertEqual(m6['Prop_Net'], m5['Prop_Net'] - 100.0)
 
-    def test_manager_incentives(self):
-        inputs = self.default_inputs.copy()
-        # Case A: 10% of Revenue, Quarterly
-        inputs['incentive_metric'] = "Revenue"
-        inputs['incentive_pct'] = 10.0
-        inputs['incentive_freq'] = "Quarterly"
-        
-        # Base rev is 10k/mo. 
-        # Q1 Rev = 30k. Used flat seasonality for simplify.
-        # Bonus should be 10% of 30k = 3000.
-        
-        model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=4)
-        
-        m1 = df.iloc[0]
-        m3 = df.iloc[2] # Q1 End
-        m4 = df.iloc[3] # New Quarter
-        
-        self.assertEqual(m1['Store_Bonus'], 0.0) # No payout M1
-        self.assertEqual(m3['Store_Bonus'], 3000.0) # Payout M3
-        # Ensure Store Net is reduced
-        # Net = Rev(10k) - COGS(5k) - Labor(4k) - Ops(500) - Rent(1k) = -550 approx (with slight labor diff)
-        # Bonus reduces it further by 3k.
-        # We can just check the Bonus column is correct (3000) and that Net is roughly Revenue - Expenses - 3000
-        # But simpler to just verify the bonus amount is as expected, which we did above.
-        self.assertEqual(m3['Store_Bonus'], 3000.0) 
 
-        
-        # Case B: 5% of NOI, Annual
-        inputs['incentive_metric'] = "Net (NOI)"
-        inputs['incentive_pct'] = 5.0
-        inputs['incentive_freq'] = "Annual"
-        
-        # Make profitable so positive NOI
-        inputs['base_revenue'] = 50000.0 
-        
-        model2 = FinancialModel(**inputs)
-        df2 = model2.calculate_projection(months=12)
-        
-        m11 = df2.iloc[10] # Nov
-        m12 = df2.iloc[11] # Dec
-        self.assertEqual(m11['Store_Bonus'], 0.0)
-        self.assertTrue(m12['Store_Bonus'] > 0.0)
-        # Verify accumulator reset? Implicit if Year 2 starts clean.
         
     def test_robust_event_features(self):
         """Test %-based events, duration windows, and dynamic targets"""
@@ -282,6 +239,68 @@ class TestFinancialLogic(unittest.TestCase):
         # Expected = 10,000 + 1000 (Active) = 11,000
         # Inactive should be ignored.
         self.assertEqual(row['Store_Revenue'], 11000.0)
+
+    def test_prev_quarter_noi_event(self):
+        """Test the Lookback Logic for NOI Events"""
+        inputs = self.default_inputs.copy()
+        inputs['base_revenue'] = 10000.0
+        inputs['seasonality'] = [1.0] * 4 # Flat seasonality
+        
+        # Scenario:
+        # M1-M3: Base Rev 10k. 
+        # Expenses: COGS 5k, Labor ~3k, Rent 1k, Ops 500.
+        # Approx NOI per month = 10k - 5k - 3k - 1k - 500 = 500.
+        # Q1 Total NOI = 1500.
+        
+        # Event: +10% of Previous Quarter NOI starting Month 4 (April)
+        # Target: Labor (Bonus)
+        e_bonus = BusinessEvent(
+            name="Quarterly Bonus",
+            start_month=4,
+            frequency="Quarterly",
+            impact_target="Labor", # Bonuses are usually labor cost
+            value_type="% of Previous Quarter NOI",
+            value=10.0, # 10%
+        )
+        
+        inputs['events'] = [e_bonus]
+        model = FinancialModel(**inputs)
+        df = model.calculate_projection(months=6)
+        
+        m1 = df.iloc[0]
+        m4 = df.iloc[3] # April (Bonus Month)
+        
+        # M1 Labor should be base (~4050 see test_base_projection)
+        self.assertAlmostEqual(m1['Store_Labor'], 4050.0, places=0)
+        
+        # Calculate expected NOI for Q1
+        # Each month M1-M3 is identical.
+        # Rev: 10000
+        # Outflow: 5000(COGS) + 4050(Labor) + 500(Ops) + 1000(Rent) = 10550
+        # Net Pre-Bonus = 10000 - 10550 = -550.
+        # Wait, my mental math in test_base_projection said -550.
+        # If NOI is negative, bonus should be 0.
+        
+        # Let's boost revenue to make it positive.
+        inputs['base_revenue'] = 12000.0
+        # Rev 12000. COGS 6000. Labor 4050. Ops 500. Rent 1000.
+        # Outflow = 11550.
+        # Net = 450.
+        # Q1 Total = 450 * 3 = 1350.
+        # Bonus = 10% of 1350 = 135.
+        
+        model_pos = FinancialModel(**inputs)
+        df_pos = model_pos.calculate_projection(months=6)
+        
+        m4_pos = df_pos.iloc[3] # April
+        
+        # Base Labor M4 is same as M1 (4050).
+        # Total M4 Labor = 4050 + 135 = 4185.
+        self.assertAlmostEqual(m4_pos['Store_Labor'], 4050.0 + 135.0, places=1)
+        
+        # Verify Month 5 (May) has no bonus (Quarterly freq)
+        m5_pos = df_pos.iloc[4]
+        self.assertAlmostEqual(m5_pos['Store_Labor'], 4050.0, places=1)
 
 if __name__ == '__main__':
     unittest.main()

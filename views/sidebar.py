@@ -44,11 +44,7 @@ def initialize_session_state():
     if 'wage_growth' not in st.session_state: st.session_state['wage_growth'] = 3.0
     if 'rent_escalation' not in st.session_state: st.session_state['rent_escalation'] = 2.0
 
-    # V2: Incentives (New)
-    if 'inc_on' not in st.session_state: st.session_state['inc_on'] = False
-    if 'inc_metric' not in st.session_state: st.session_state['inc_metric'] = "Net (NOI)"
-    if 'inc_pct' not in st.session_state: st.session_state['inc_pct'] = 5.0
-    if 'inc_freq' not in st.session_state: st.session_state['inc_freq'] = "Annual"
+
 
     # V2: Events
     if 'events' not in st.session_state: st.session_state['events'] = []
@@ -258,17 +254,7 @@ def _render_growth_and_expenses():
         
         return [s_q1, s_q2, s_q3, s_q4], rev_growth, exp_growth, wage_growth, rent_escalation
 
-def _render_incentives():
-    with st.sidebar.expander("💰 Manager Incentives"):
-        inc_on = st.checkbox("Enable Performance Bonus", key="inc_on")
-        inc_metric = "None"
-        inc_pct = 0.0
-        inc_freq = "Annual"
-        if inc_on:
-            inc_metric = st.selectbox("Bonus Metric", ["Net (NOI)", "Revenue"], key="inc_metric")
-            inc_pct = st.number_input("Bonus %", 0.0, 50.0, step=0.5, key="inc_pct", help="Percentage of Metric paid as bonus.")
-            inc_freq = st.selectbox("Payout Frequency", ["Annual", "Quarterly"], key="inc_freq")
-        return inc_pct, inc_metric, inc_freq
+
 
 def _render_event_management():
     # --- Edit Logic state management ---
@@ -312,7 +298,7 @@ def _render_event_management():
                     targets = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"]
                     if ev.get('impact_target') in targets: idx_target = targets.index(ev.get('impact_target'))
                     
-                    vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops"]
+                    vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"]
                     if ev.get('value_type') in vtypes: idx_val_type = vtypes.index(ev.get('value_type'))
             except Exception:
                 st.session_state['edit_event_idx'] = None # Reset on error
@@ -333,7 +319,7 @@ def _render_event_management():
         e_entity = c3.selectbox("Entity", ["Store", "Property"], index=idx_entity)
         e_target = c4.selectbox("Target", ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"], index=idx_target)
         
-        e_val_type = st.selectbox("Value Type", ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops"], index=idx_val_type)
+        e_val_type = st.selectbox("Value Type", ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"], index=idx_val_type)
         
         val_help = "Enter absolute dollar amount" if "Fixed" in e_val_type else "Enter percentage (e.g. 5.0 for 5%)"
         e_val = st.number_input("Value", value=float(default_val), step=10.0 if "Fixed" in e_val_type else 0.5, help=val_help)
@@ -453,7 +439,6 @@ def render_sidebar():
     _render_acquisition()
     _render_ops()
     seasonality, rev_growth, exp_growth, wage_growth, rent_escalation = _render_growth_and_expenses()
-    inc_pct, inc_metric, inc_freq = _render_incentives()
     events_objects = _render_event_management()
 
     # Return Config Dict
@@ -483,9 +468,7 @@ def render_sidebar():
         "commercial_rent_income": st.session_state['rental_income_comm'],
         "residential_rent_income": st.session_state['rental_income_res'],
         
-        "incentive_pct": inc_pct,
-        "incentive_metric": inc_metric,
-        "incentive_freq": inc_freq,
+
         
         "start_date": st.session_state['start_date'],
         

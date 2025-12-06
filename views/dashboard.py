@@ -79,6 +79,49 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         c1.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.0f}")
         c2.metric(f"Avg Cash Flow (Per {aggregation[:-2]})", f"${avg_cf_per_period:,.0f}")
         
+        # KPI Row 2
+        net_margin_agg = (df_view['Store_Net'].sum() / df_view['Store_Revenue'].sum()) * 100.0
+        prop_noi_agg = df_view['Prop_Net'].sum() + df_view['Prop_Debt'].sum()
+        dscr_agg = prop_noi_agg / df_view['Prop_Debt'].sum() if df_view['Prop_Debt'].sum() > 0 else 0.0
+        
+        c3.metric("Avg Net Margin %", f"{net_margin_agg:.1f}%")
+        
+        c4, c5, c6 = st.columns(3)
+        c4.metric("Avg Property DSCR", f"{dscr_agg:.2f}x", help=">1.25x is healthy")
+        
+        # Interactive Waterfall Section (Moved up for visibility)
+        st.subheader("Profit Anatomy (Waterfall)")
+        c_w_sel, _ = st.columns([1, 3])
+        water_year = c_w_sel.selectbox("Select Year for Waterfall", range(1, time_horizon + 1))
+        
+        y_data = df_projection[df_projection['Year']==water_year].sum()
+        
+        fig_water = go.Figure(go.Waterfall(
+            name = f"Year {water_year}", orientation = "v",
+            measure = ["relative", "relative", "relative", "relative", "relative", "relative", "total", "relative", "total"],
+            x = ["Revenue", "COGS", "Labor", "Ops", "Rent", "Capex", "Store Net", "+ Prop Net", "Owner CF"],
+            textposition = "outside",
+            y = [
+                y_data['Store_Revenue'], 
+                -y_data['Store_COGS'], 
+                -y_data['Store_Labor'], 
+                -y_data['Store_Ops_Ex'], 
+                -y_data['Store_Rent_Ex'], 
+                -y_data['Capex'], 
+                None, 
+                y_data['Prop_Net'],
+                None 
+            ],
+            connector = {"line":{"color":"rgb(63, 63, 63)"}},
+        ))
+        
+        fig_water.update_layout(
+                title = f"Year {water_year} Profit Flow",
+                showlegend = False,
+                height=400
+        )
+        st.plotly_chart(fig_water, width="stretch", key="chart_waterfall_interactive")
+        
         # Detail Toggle
         show_detail = st.checkbox("Show Detailed Breakdown (P&L)", value=False)
 
@@ -203,33 +246,6 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                     width="stretch"
                 )
 
-        st.subheader("Visual Explanation: Year 1 Profit Waterfall")
-        # Waterfall for Year 1 (Standardized View)
-        y1_data = df_projection[df_projection['Year']==1].sum()
-        
-        fig_water = go.Figure(go.Waterfall(
-            name = "20", orientation = "v",
-            measure = ["relative", "relative", "relative", "relative", "relative", "relative", "total", "relative", "total"],
-            x = ["Revenue", "COGS", "Labor", "Ops", "Rent", "Capex", "Store Net", "+ Prop Net", "Owner CF"],
-            textposition = "outside",
-            y = [
-                y1_data['Store_Revenue'], 
-                -y1_data['Store_COGS'], 
-                -y1_data['Store_Labor'], 
-                -y1_data['Store_Ops_Ex'], 
-                -y1_data['Store_Rent_Ex'], 
-                -y1_data['Capex'], 
-                None, # Store Net Calc
-                y1_data['Prop_Net'],
-                None  # Owner CF Calc
-            ],
-            connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        ))
-        
-        fig_water.update_layout(
-                title = "Year 1 Profit Flow (Waterfall)",
-                showlegend = True
-        )
         st.plotly_chart(fig_water, width="stretch")
             
         st.subheader(f"{time_horizon}-Year Consolidated Projection")
@@ -245,7 +261,54 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
             title=f"Owner Cash Flow: Periodic vs Cumulative ({aggregation})",
             hovermode="x unified"
         )
-        st.plotly_chart(fig_owner, width="stretch")
+        st.plotly_chart(fig_owner, width="stretch", key="chart_owner_cf")
+        
+        # --- NEW VISUALIZATIONS ---
+        
+        # 1. Expense Breakdown (Stacked)
+        st.subheader("Cost Structure Analysis")
+        c_exp, c_marg = st.columns(2)
+        
+        with c_exp:
+            st.caption("Expense Breakdown by Category")
+            fig_stack = go.Figure()
+            # Stacks
+            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_COGS'], name='COGS'))
+            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_Labor'], name='Labor'))
+            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_Rent_Ex'], name='Rent'))
+            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_Ops_Ex'], name='Ops & Fixed'))
+            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Prop_Debt'], name='Debt Service (Prop)'))
+            
+            fig_stack.update_layout(barmode='stack', legend=dict(orientation="h", y=-0.2))
+            st.plotly_chart(fig_stack, width="stretch", key="chart_expense_stack")
+            
+        with c_marg:
+            st.caption("Profit Margin Trends")
+            # Calculate Margin %
+            # Avoid div by zero
+            df_view['Net_Margin_Pct'] = (df_view['Store_Net'] / df_view['Store_Revenue'].replace(0, 1)) * 100.0
+            
+            fig_marg = go.Figure()
+            fig_marg.add_trace(go.Scatter(x=x_axis, y=df_view['Net_Margin_Pct'], mode='lines+markers', name='Net Margin %', line=dict(color='purple', width=3)))
+            
+            # Add Prop DSCR if applicable
+            # DSCR = NOI / Debt
+            # Prop NOI = Prop Income - Prop Ops. Prop Net = NOI - Debt. So NOI = Prop Net + Debt.
+            # Actually Prop Net in model includes debt deduction.
+            if df_view['Prop_Debt'].sum() > 0:
+                 df_view['Prop_NOI'] = df_view['Prop_Net'] + df_view['Prop_Debt']
+                 df_view['DSCR'] = df_view['Prop_NOI'] / df_view['Prop_Debt'].replace(0, 1)
+                 fig_marg.add_trace(go.Scatter(x=x_axis, y=df_view['DSCR'], mode='lines', name='Prop DSCR (x)', yaxis='y2', line=dict(dash='dot', color='orange')))
+            
+            fig_marg.update_layout(
+                yaxis=dict(title="Net Margin %"),
+                yaxis2=dict(title="DSCR (x)", overlaying='y', side='right'),
+                hovermode="x unified",
+                legend=dict(orientation="h", y=-0.2)
+            )
+            st.plotly_chart(fig_marg, width="stretch", key="chart_margin_trend")
+
+
 
     else:
         # Separated View

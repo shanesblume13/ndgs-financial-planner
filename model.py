@@ -16,7 +16,7 @@ class BusinessEvent:
     end_month: int = 120
     frequency: str = "One-time" # "One-time", "Monthly", "Quarterly", "Annually"
     impact_target: str = "Revenue" # "Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"
-    value_type: str = "Fixed Amount ($)" # "Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops"
+    value_type: str = "Fixed Amount ($)" # "Fixed Amount ($)", "% of Revenue", "% of Cost", "% of Net (NOI) - Prev Quarter"
     value: float = 0.0
     affected_entity: str = "Store" # "Store", "Property", "Both"
     description: str = ""
@@ -63,10 +63,7 @@ class FinancialModel:
     commercial_rent_income: float
     residential_rent_income: float
     
-    # Incentives (Defaults)
-    incentive_pct: float = 0.0 # 0-100
-    incentive_metric: str = "None" # "Revenue", "Net (NOI)"
-    incentive_freq: str = "Annual" # "Annual", "Quarterly"
+
     
     # Dynamic Events
     events: List[BusinessEvent] = field(default_factory=list)
@@ -89,9 +86,7 @@ class FinancialModel:
         cumulative_cash_store = -initial_capex 
         cumulative_cash_prop = 0.0
         
-        # Incentive Accumulators
-        acc_rev_period = 0.0
-        acc_noi_period = 0.0
+
 
         for m in range(1, months + 1):
             year_idx = (m - 1) // 12
@@ -176,6 +171,21 @@ class FinancialModel:
                     val = cogs_base_amt * (e.value / 100.0)
                 elif e.value_type == "% of Ops":
                      val = store_ops_expenses * (e.value / 100.0)
+                elif e.value_type == "% of Previous Quarter NOI":
+                    # Sum NOI from previous 3 months (m-1, m-2, m-3)
+                    # Indices in projection list: m-2, m-3, m-4
+                    # Only valid if m > 3
+                    if m > 3:
+                        prev_q_noi = 0.0
+                        for i in range(1, 4):
+                             # Check existence
+                             if (m - i - 1) >= 0:
+                                 prev_data = projection[m - i - 1]
+                                 prev_q_noi += prev_data.get("Store_NOI_Pre", 0.0)
+                        
+                        # Only apply bonus if NOI is positive? Yes, standard practice.
+                        if prev_q_noi > 0:
+                             val = prev_q_noi * (e.value / 100.0)
                 
                 # 4. Apply to Target
                 # Note: We iterate all events. Order doesn't matter as we base % on Base amounts (safe).
@@ -214,29 +224,8 @@ class FinancialModel:
             store_noi_pre_bonus = store_total_revenue - store_total_outflow_pre_bonus
             
             # --- INCENTIVE CALCULATION ---
-            acc_rev_period += store_total_revenue
-            acc_noi_period += store_noi_pre_bonus
             
             bonus_payout = 0.0
-            payout_due = False
-            
-            if self.incentive_pct > 0 and self.incentive_metric != "None":
-                if self.incentive_freq == "Annual":
-                    if month_in_year == 11: # Dec
-                        payout_due = True
-                elif self.incentive_freq == "Quarterly":
-                    if (m % 3) == 0: # Mar, Jun, Sep, Dec
-                        payout_due = True
-                        
-                if payout_due:
-                    basis = acc_rev_period if self.incentive_metric == "Revenue" else acc_noi_period
-                    # If basis < 0 (negative NOI), assume no bonus? Yes.
-                    if basis > 0:
-                        bonus_payout = basis * (self.incentive_pct / 100.0)
-                    
-                    # Reset accumulators after payout period ends
-                    acc_rev_period = 0.0
-                    acc_noi_period = 0.0
 
             # Final Store Net
             store_net_cash = store_noi_pre_bonus - bonus_payout - event_capex_store
@@ -290,7 +279,8 @@ class FinancialModel:
                 # Consolidated
                 "Owner_Cash_Flow": consolidated_cash,
                 "Owner_Cum": cumulative_cash_owner,
-                "Capex": event_capex_store + event_capex_prop
+                "Capex": event_capex_store + event_capex_prop,
+                "Store_NOI_Pre": store_noi_pre_bonus # Helper for lookback
             })
             
         return pd.DataFrame(projection)

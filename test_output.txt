@@ -1,0 +1,78 @@
+.............2025-12-06 00:07:25.794 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2025-12-06 00:07:25.799 Uncaught app execution
+Traceback (most recent call last):
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 671, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shaneblume/Development/ndgs-financial-planner/app.py", line 5, in <module>
+    import views.sidebar as sidebar
+  File "/Users/shaneblume/Development/ndgs-financial-planner/views/sidebar.py", line 315
+    vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"]
+SyntaxError: expected 'except' or 'finally' block
+F2025-12-06 00:07:25.838 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2025-12-06 00:07:25.840 Uncaught app execution
+Traceback (most recent call last):
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 671, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shaneblume/Development/ndgs-financial-planner/app.py", line 5, in <module>
+    import views.sidebar as sidebar
+  File "/Users/shaneblume/Development/ndgs-financial-planner/views/sidebar.py", line 315
+    vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"]
+SyntaxError: expected 'except' or 'finally' block
+E2025-12-06 00:07:25.842 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2025-12-06 00:07:25.844 Uncaught app execution
+Traceback (most recent call last):
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 671, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/shaneblume/Development/ndgs-financial-planner/app.py", line 5, in <module>
+    import views.sidebar as sidebar
+  File "/Users/shaneblume/Development/ndgs-financial-planner/views/sidebar.py", line 315
+    vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"]
+SyntaxError: expected 'except' or 'finally' block
+E
+======================================================================
+ERROR: test_interaction (test_ui.TestAppUI.test_interaction)
+Verify changing an input triggers rerun and no error
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/shaneblume/Development/ndgs-financial-planner/tests/test_ui.py", line 37, in test_interaction
+    at.sidebar.slider('operating_hours').set_value(10).run()
+    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/testing/v1/element_tree.py", line 258, in __call__
+    raise KeyError(key)
+KeyError: 'operating_hours'
+
+======================================================================
+ERROR: test_sidebar_defaults (test_ui.TestAppUI.test_sidebar_defaults)
+Verify sidebar inputs exist
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/shaneblume/Development/ndgs-financial-planner/tests/test_ui.py", line 25, in test_sidebar_defaults
+    self.assertIsNotNone(at.sidebar.number_input('loan_amount'))
+                         ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/testing/v1/element_tree.py", line 258, in __call__
+    raise KeyError(key)
+KeyError: 'loan_amount'
+
+======================================================================
+FAIL: test_app_load (test_ui.TestAppUI.test_app_load)
+Smoke test: Verify the app runs without error
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/shaneblume/Development/ndgs-financial-planner/tests/test_ui.py", line 16, in test_app_load
+    self.assertFalse(at.exception, "App crashed with an exception")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ElementList(_list=[Exception(message='File "/Users/shaneblume/Development/ndgs-financial-planner/views/sidebar.py", line 315\n          vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"]\n         ^\nSyntaxError: expected \'except\' or \'finally\' block', stack_trace=['File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling\n    result = func()', 'File "/Users/shaneblume/Development/ndgs-financial-planner/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 671, in code_to_exec\n    exec(code, module.__dict__)  # noqa: S102\n    ~~~~^^^^^^^^^^^^^^^^^^^^^^^', 'File "/Users/shaneblume/Development/ndgs-financial-planner/app.py", line 5, in <module>\n    import views.sidebar as sidebar'])]) is not false : App crashed with an exception
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.054s
+
+FAILED (failures=1, errors=2)
