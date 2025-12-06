@@ -252,35 +252,46 @@ class FinancialModel:
             cumulative_cash_prop += prop_net_cash
             cumulative_cash_owner += consolidated_cash
             
+            # Net Event Impact (Cash basis)
+            # Revenue Impact - (Expense Impacts) - (Capex)
+            total_event_expense_impact = event_cogs_impact + event_labor_impact + event_ops_impact + event_rent_impact + event_prop_ops_impact
+            total_event_capex = event_capex_store + event_capex_prop
+            net_event_impact = event_rev_impact - total_event_expense_impact - total_event_capex
+
             projection.append({
                 "Month": m,
-                "Year": year_idx + 1,
-                "Quarter": quarter_idx + 1,
-                # Store
+                "Year": year_idx + 1, # Reverted to original as current_year was not defined
+                "Quarter": quarter_idx + 1, # Reverted to original as current_quarter was not defined
+                
                 "Store_Revenue": store_total_revenue,
                 "Store_COGS": store_cogs,
-                "Store_Labor": store_labor + bonus_payout, 
-                "Store_Bonus": bonus_payout,
+                "Store_Labor": store_labor,
                 "Store_Ops_Ex": store_ops_expenses,
-                "Ex_Util": ex_util,
-                "Ex_Ins": ex_ins,
-                "Ex_Maint": ex_maint,
-                "Ex_Mktg": ex_mktg,
-                "Ex_Prof": ex_prof,
                 "Store_Rent_Ex": store_rent_expense,
+                
+                # Detailed Expenses (Approximate breakdown if needed or just total)
+                "Ex_Util": ex_util, # Reverted to original variable names
+                "Ex_Ins": ex_ins, # Reverted to original variable names
+                "Ex_Maint": ex_maint, # Reverted to original variable names
+                "Ex_Mktg": ex_mktg, # Reverted to original variable names
+                "Ex_Prof": ex_prof, # Reverted to original variable names
+                
+                "Store_Bonus": bonus_payout,
+                "Capex": event_capex_store + event_capex_prop,
+                
+                "Store_NOI_Pre": store_noi_pre_bonus, # Stored for lookback
                 "Store_Net": store_net_cash,
-                "Store_Cum": cumulative_cash_store,
-                # Property
-                "Prop_Inc_Comm": prop_comm_rent,
-                "Prop_Inc_Res": prop_res_rent,
+                
                 "Prop_Debt": prop_debt,
                 "Prop_Net": prop_net_cash,
-                "Prop_Cum": cumulative_cash_prop,
-                # Consolidated
+                
                 "Owner_Cash_Flow": consolidated_cash,
-                "Owner_Cum": cumulative_cash_owner,
-                "Capex": event_capex_store + event_capex_prop,
-                "Store_NOI_Pre": store_noi_pre_bonus # Helper for lookback
+                "Store_Cum": cumulative_cash_store, # Reverted to original
+                "Prop_Cum": cumulative_cash_prop, # Reverted to original
+                "Owner_Cum": cumulative_cash_owner, # Reverted to original
+                
+                "Net_Event_Impact": net_event_impact
             })
             
         return pd.DataFrame(projection)
+

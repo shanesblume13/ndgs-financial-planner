@@ -50,7 +50,8 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         # Cumulative (Last value)
         'Store_Cum': 'last', 
         'Prop_Cum': 'last', 
-        'Owner_Cum': 'last'
+        'Owner_Cum': 'last',
+        'Net_Event_Impact': 'sum'
     }
 
     if aggregation == "Quarterly":
@@ -106,6 +107,7 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                     # Investment
                     "Capex",
                     # Bottom Line
+                    "Net_Event_Impact", # Add new column
                     "Store_Net", "Prop_Net", "Owner_Cash_Flow"
                 ]
                 
@@ -179,6 +181,7 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                     "Ex_Prof": ("Detailed Expenses", "Professional"),
                     "Store_Rent_Ex": ("Store Operations", "Rent Paid"),
                     "Capex": ("Investment", "Capex"),
+                    "Net_Event_Impact": ("Bottom Line", "Event Adjustments"),
                     "Store_Net": ("Bottom Line", "Store Net"),
                     "Prop_Net": ("Bottom Line", "Property Net"),
                     "Owner_Cash_Flow": ("Bottom Line", "Total Owner CF")
@@ -254,6 +257,38 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         fig_owner.add_trace(go.Bar(x=x_axis, y=df_view['Owner_Cash_Flow'], name='Periodic CF', marker_color='lightgreen'))
         # Line for cumulative
         fig_owner.add_trace(go.Scatter(x=x_axis, y=df_view['Owner_Cum'], mode='lines', name='Cumulative', line=dict(color='darkgreen', width=3), yaxis='y2'))
+        
+        # Add Vertical Lines for Events
+        if model_events:
+            for e in model_events:
+                if e.is_active:
+                    # Find x-location. 
+                    # If Monthly: Month (e.start_month) -> "Jan 20xx" ? x_axis is Month (1-120).
+                    # If Annual: Year (e.start_month // 12 + 1) -> x_axis is Year (1-10).
+                    # We need to map approx location.
+                    
+                    x_loc = None
+                    if aggregation == "Monthly":
+                        if e.start_month <= len(x_axis):
+                            x_loc = e.start_month 
+                    elif aggregation == "Annual":
+                        y_start = (e.start_month - 1) // 12 + 1
+                        if y_start <= time_horizon:
+                            x_loc = y_start
+                    elif aggregation == "Quarterly":
+                         # Quarter index (1-40)
+                         q_start = (e.start_month - 1) // 3 + 1
+                         # x_axis is "Q{abs_quarter}" ? No, x_axis is "Q1", "Q2" .. logic in line 60.
+                         # Line 60: x_axis = df_view['Abs_Quarter'].apply(lambda x: f"Q{x}")
+                         # Actually Abs_Quarter is int.
+                         # Wait, df_view is aggregated. len(df_view) should match len(x_axis).
+                         # We need to find the index where 'Abs_Quarter' == q_start
+                         if q_start in df_view['Abs_Quarter'].values:
+                             x_loc = f"Q{q_start}" 
+
+                    if x_loc:
+                        fig_owner.add_vline(x=x_loc, line_width=1, line_dash="dash", line_color="red", opacity=0.5)
+                        fig_owner.add_annotation(x=x_loc, y=0, text=e.name, showarrow=False, yref='paper', yanchor='bottom', textangle=-90, font=dict(color="red"))
         
         fig_owner.update_layout(
             yaxis=dict(title="Periodic Cash Flow"),
@@ -383,7 +418,8 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                 full_context = {
                     "Input_Parameters": current_context,
                     "10_Year_Summary": summary_10y,
-                    "Events": [e.__dict__ for e in model_events]
+                    "Events": [e.__dict__ for e in model_events],
+                    "Full_Data_CSV": df_projection.to_csv(index=False)
                 }
                 summary = ask_ai(analysis_prompt, full_context, provider=ai_config['provider'], api_key=ai_config['api_key'], model_id=ai_config['model_id'])
                 st.info(summary)
@@ -401,7 +437,8 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
             context_data = {
                 "year_1_summary": summary_y1,
                 "assumptions": inputs_summary,
-                "events_count": len(model_events)
+                "events_count": len(model_events),
+                "Full_Data_CSV": df_projection.to_csv(index=False)
             }
             
             response = ask_ai(user_question, context_data, provider=ai_config['provider'], api_key=ai_config['api_key'], model_id=ai_config['model_id'])
