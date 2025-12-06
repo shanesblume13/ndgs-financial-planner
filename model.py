@@ -48,7 +48,8 @@ class FinancialModel:
     operating_hours: int
     
     # Staffing
-    manager_salary: float
+    manager_weekly_hours: float
+    manager_wage_hourly: float
     hourly_wage: float
     avg_staff: float
 
@@ -119,11 +120,26 @@ class FinancialModel:
             cogs_base_amt = (self.base_revenue * self.base_cogs_pct) * rev_growth_factor * seasonality_factor
             
             # 3. Labor (Base)
-            manager_mo = (self.manager_salary / 12.0) * wage_growth_factor
+            # Manager Cost
+            current_manager_wage = self.manager_wage_hourly * wage_growth_factor
+            manager_hours_mo = self.manager_weekly_hours * 52.0 / 12.0
+            manager_mo_cost = current_manager_wage * manager_hours_mo
+            
+            # Hourly Staff Cost (With Offset)
             current_hourly_wage = self.hourly_wage * wage_growth_factor
-            staff_base_mo = current_hourly_wage * self.avg_staff * self.operating_hours * DAYS_IN_MONTH
+            
+            # Total Man-Hours Required
+            total_required_hours = self.avg_staff * self.operating_hours * DAYS_IN_MONTH
+            
+            # Offset Logic: Subtract Manager Hours from Required Hours
+            # Assuming Manager counts as 1.0 staff when on floor
+            required_hourly_staff_hours = max(0.0, total_required_hours - manager_hours_mo)
+            
+            staff_cost_mo = current_hourly_wage * required_hourly_staff_hours
+            
+            # Apply Seasonality to Hourly Staff only (Managers are usually fixed/stable presence)
             labor_seasonality = 1 + (seasonality_factor - 1) * 0.5
-            store_labor = manager_mo + (staff_base_mo * labor_seasonality)
+            store_labor = manager_mo_cost + (staff_cost_mo * labor_seasonality)
 
             # 4. Store Ops Expenses (Base)
             # 4. Store Ops Expenses (Detailed)

@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import datetime
 import pandas as pd
 
 # Add parent directory to path to import app modules
@@ -21,8 +22,9 @@ class TestFinancialLogic(unittest.TestCase):
             "base_revenue": 10000.0, # Simple number
             "base_cogs_pct": 0.50,
             "operating_hours": 10,
-            "manager_salary": 12000.0, # 1k/mo
-            "hourly_wage": 10.0, 
+            "manager_wage_hourly": 20.0, # 20/hr
+            "manager_weekly_hours": 10.0, # 10 hrs/week -> ~43.33 hrs/mo -> Cost: 866.66
+            "hourly_wage": 10.0,  
             "avg_staff": 1.0, # 10hrs * 10/hr * 30.5 = 3050.0
             "utilities": 100.0,
             "insurance": 100.0,
@@ -33,6 +35,7 @@ class TestFinancialLogic(unittest.TestCase):
             "loan_amount": 100000.0,
             "interest_rate": 0.0, # Simplify Debt
             "amortization_years": 10,
+            "initial_capex": 50000.0,
             "commercial_rent_income": 1000.0,
             "residential_rent_income": 500.0,
             # Events
@@ -56,33 +59,52 @@ class TestFinancialLogic(unittest.TestCase):
     def test_base_projection(self):
         """Verify Year 1 Month 1 calculations with no growth/seasonality"""
         model = FinancialModel(**self.default_inputs)
-        df = model.calculate_projection(months=1)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=1)
         row = df.iloc[0]
         
         # Revenue: 10,000 (Base)
         self.assertEqual(row['Store_Revenue'], 10000.0)
         
-        # COGS: 50% of 10,000 = 5,000
-        self.assertEqual(row['Store_COGS'], 5000.0)
+        # COGS: 50% of 10,000 = 5,000 (Negative)
+        self.assertEqual(row['Store_COGS'], -5000.0)
         
-        # Labor: Manager(1k) + Staff(10 * 10 * 1 * 30.5 = 3050) = 4050
-        # Wait, app.py uses DAYS_IN_MONTH = 30.5 global constant
-        expected_staff = 10.0 * 1.0 * 10 * 30.5
-        expected_labor = 1000.0 + expected_staff
-        self.assertEqual(row['Store_Labor'], expected_labor)
+        # Labor Calculation Update:
+        # Manager: 20/hr * 10 hrs/wk * (52/12) = 20 * 43.333 = 866.666
+        mgr_monthly_hours = 10.0 * 52.0 / 12.0
+        mgr_cost = 20.0 * mgr_monthly_hours
         
-        # Ops Expenses: 500 (Base fixed)
-        self.assertEqual(row['Store_Ops_Ex'], 500.0)
+        # Staff Requirement: 1.0 (Avg Staff) * 10 (Op Hours) * 30.5 (Days) = 305.0 Hours Total
+        total_req_hours = 1.0 * 10 * 30.5
         
-        # Rent Expense: 1000
-        self.assertEqual(row['Store_Rent_Ex'], 1000.0)
+        # Offset: 305.0 - 43.333 = 261.666 Hours needed from Hourly Staff
+        hourly_needed = total_req_hours - mgr_monthly_hours
+        staff_cost = hourly_needed * 10.0
         
-        # Store Net: 10000 - 5000 - 4050 - 500 - 1000 = -550
+        expected_labor = mgr_cost + staff_cost
+        
+        # Expect Negative
+        self.assertAlmostEqual(row['Store_Labor'], -expected_labor, places=2)
+        
+        # Ops Expenses: 500 (Base fixed) -> Negative
+        self.assertEqual(row['Store_Ops_Ex'], -500.0)
+        
+        # Rent Expense: 1000 -> Negative
+        self.assertEqual(row['Store_Rent_Ex'], -1000.0)
+        
+        # Store Net: 10000 - 5000 - labor - 500 - 1000
+        # Formula uses the signed values (Revenue + COGS + ...)? 
+        # Model: store_net_cash = store_noi_pre_bonus - bonus - capex
+        # store_noi_pre_bonus = store_total_revenue - store_total_outflow
+        # store_total_outflow = cogs + labor + ops + rent (all positive magnitudes)
         expected_net_store = 10000.0 - 5000.0 - expected_labor - 500.0 - 1000.0
         self.assertAlmostEqual(row['Store_Net'], expected_net_store, places=2)
         
         # Property Net: Rent(1000) + Res(500) - Debt(100k/10y/0% = 833.33)
         # 1500 - 833.33 = 666.67
+        # Debt in output is negative?
+        # Row 319: "Prop_Debt": -prop_debt,
+        self.assertEqual(row['Prop_Debt'], -1000.0 * (100.0/120.0)) # 833.333
+        
         expected_debt = 100000.0 / (10 * 12)
         expected_net_prop = 1500.0 - expected_debt
         self.assertAlmostEqual(row['Prop_Net'], expected_net_prop, places=2)
@@ -98,7 +120,7 @@ class TestFinancialLogic(unittest.TestCase):
         inputs = self.default_inputs.copy()
         inputs['seasonality'] = [0.5, 1.0, 1.5, 1.0] # Q1 half, Q3 1.5x
         model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=12)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=12)
         
         # Month 1 (Q1): Factor 0.5. Rev should be 5000.
         self.assertEqual(df.iloc[0]['Store_Revenue'], 5000.0)
@@ -109,12 +131,19 @@ class TestFinancialLogic(unittest.TestCase):
         # Verify Labor Seasonality (Partial Flex)
         # Logic: 1 + (Seasonality-1)*0.5
         # Q1 Labor Factor: 1 + (0.5-1)*0.5 = 0.75
-        # Base Staff Labor 3050 -> 2287.5
-        # Manager Fixed 1000
-        # Total M1 Labor = 3287.5
-        base_staff = 3050.0
-        expected_q1_labor = 1000.0 + (base_staff * 0.75)
-        self.assertEqual(df.iloc[0]['Store_Labor'], expected_q1_labor)
+        
+        # Re-calc Base Labor Parts from setup (same as test_base_projection logic)
+        mgr_monthly_hours = 10.0 * 52.0 / 12.0
+        mgr_cost = 20.0 * mgr_monthly_hours  # Fixed, not seasonal
+        
+        total_req_hours = 1.0 * 10 * 30.5
+        hourly_needed = total_req_hours - mgr_monthly_hours
+        staff_base_cost = hourly_needed * 10.0
+        
+        # Apply Seasonality to Staff Cost Only
+        expected_q1_labor = mgr_cost + (staff_base_cost * 0.75)
+        # Expect negative
+        self.assertAlmostEqual(df.iloc[0]['Store_Labor'], -expected_q1_labor, places=2)
 
     def test_growth_rates(self):
         """Verify Year 2 Compounding"""
@@ -124,7 +153,7 @@ class TestFinancialLogic(unittest.TestCase):
         inputs['rent_escalation_rate'] = 2.0 # 2%
         
         model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=13)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=13)
         
         # M1 (Year 1): Base values
         m1 = df.iloc[0]
@@ -134,11 +163,11 @@ class TestFinancialLogic(unittest.TestCase):
         # Revenue: 10000 -> 11000
         self.assertAlmostEqual(m13['Store_Revenue'], m1['Store_Revenue'] * 1.10)
         
-        # Rent Expense: 1000 -> 1020
-        self.assertAlmostEqual(m13['Store_Rent_Ex'], 1000.0 * 1.02)
+        # Rent Expense: 1000 -> 1020 (Negative)
+        self.assertAlmostEqual(m13['Store_Rent_Ex'], -1020.0)
         
-        # Ops Expense: 500 -> 525
-        self.assertAlmostEqual(m13['Store_Ops_Ex'], 500.0 * 1.05)
+        # Ops Expense: 500 -> 525 (Negative)
+        self.assertAlmostEqual(m13['Store_Ops_Ex'], -525.0)
 
     def test_events_and_entity_attribution(self):
         inputs = self.default_inputs.copy()
@@ -149,7 +178,7 @@ class TestFinancialLogic(unittest.TestCase):
         
         inputs['events'] = [e_store_rev, e_store_ops, e_prop]
         model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=6)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=6)
         
         m5 = df.iloc[4] # Month 5 (Before)
         m6 = df.iloc[5] # Month 6 (Start)
@@ -157,9 +186,10 @@ class TestFinancialLogic(unittest.TestCase):
         # Store Check:
         # Rev increases by 1000
         self.assertEqual(m6['Store_Revenue'], m5['Store_Revenue'] + 1000.0)
-        # Ops Ex increases by 500 (Store event only)
+        # Ops Ex increases by 500 (Store event only) -> Becomes MORE negative
         # Prop event (100) should NOT be in Store Ops
-        self.assertEqual(m6['Store_Ops_Ex'], m5['Store_Ops_Ex'] + 500.0)
+        # m5 ops is -500. m6 ops should be -1000.
+        self.assertEqual(m6['Store_Ops_Ex'], m5['Store_Ops_Ex'] - 500.0)
         
         # Property Check:
         # Prop Net should decrease by 100 (Expense)
@@ -197,7 +227,7 @@ class TestFinancialLogic(unittest.TestCase):
         
         inputs['events'] = [e1, e2]
         model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=12)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=12)
         
         m5 = df.iloc[4] # May
         m6 = df.iloc[5] # Jun (Rent hike starts)
@@ -205,10 +235,10 @@ class TestFinancialLogic(unittest.TestCase):
         m10 = df.iloc[9] # Oct (Rev boost ends)
         
         # 1. Rent Check
-        # M5 Rent = 1000 (Base)
-        # M6 Rent = 1000 + 500 = 1500
-        self.assertEqual(m5['Store_Rent_Ex'], 1000.0)
-        self.assertEqual(m6['Store_Rent_Ex'], 1500.0)
+        # M5 Rent = -1000 (Base)
+        # M6 Rent = -1000 - 500 = -1500
+        self.assertEqual(m5['Store_Rent_Ex'], -1000.0)
+        self.assertEqual(m6['Store_Rent_Ex'], -1500.0)
         
         # 2. Revenue Check
         # M6 Rev = 10000 (Base)
@@ -220,7 +250,7 @@ class TestFinancialLogic(unittest.TestCase):
         # M10 (Oct) should be back to base Revenue (10000)
         self.assertEqual(m10['Store_Revenue'], 10000.0)
         # Rent should still be high (end_month=120)
-        self.assertEqual(m10['Store_Rent_Ex'], 1500.0)
+        self.assertEqual(m10['Store_Rent_Ex'], -1500.0)
 
 
     def test_is_active_toggle(self):
@@ -232,7 +262,7 @@ class TestFinancialLogic(unittest.TestCase):
         
         inputs['events'] = [e_active, e_inactive]
         model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=1)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=1)
         row = df.iloc[0]
         
         # Base Rev = 10,000
@@ -265,13 +295,18 @@ class TestFinancialLogic(unittest.TestCase):
         
         inputs['events'] = [e_bonus]
         model = FinancialModel(**inputs)
-        df = model.calculate_projection(months=6)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=6)
         
         m1 = df.iloc[0]
         m4 = df.iloc[3] # April (Bonus Month)
         
-        # M1 Labor should be base (~4050 see test_base_projection)
-        self.assertAlmostEqual(m1['Store_Labor'], 4050.0, places=0)
+        # M1 Labor should be base. Recalculate what base is for assert.
+        # Mgr: 20*43.33 = 866.66
+        # Staff: 1.0 * 10 * 30.5 = 305 hours. Offset = 305 - 43.33 = 261.66
+        # Staff Cost: 261.66 * 10 = 2616.66
+        # Total ~ 3483.33
+        base_labor_expected = (20.0 * (10*52/12)) + (10.0 * ((1.0*10*30.5) - (10*52/12)))
+        self.assertAlmostEqual(m1['Store_Labor'], -base_labor_expected, places=1)
         
         # Calculate expected NOI for Q1
         # Each month M1-M3 is identical.
@@ -290,17 +325,18 @@ class TestFinancialLogic(unittest.TestCase):
         # Bonus = 10% of 1350 = 135.
         
         model_pos = FinancialModel(**inputs)
-        df_pos = model_pos.calculate_projection(months=6)
+        df_pos = model_pos.calculate_projection(start_date=datetime.date(2024, 1, 1), months=6)
         
         m4_pos = df_pos.iloc[3] # April
         
-        # Base Labor M4 is same as M1 (4050).
-        # Total M4 Labor = 4050 + 135 = 4185.
-        self.assertAlmostEqual(m4_pos['Store_Labor'], 4050.0 + 135.0, places=1)
+        # Base Labor M4 is same as M1.
+        # Total M4 Labor = base_labor_expected + 305 = 3788.33.
+        # Expect MORE negative
+        self.assertAlmostEqual(m4_pos['Store_Labor'], -(base_labor_expected + 305.0), places=1)
         
         # Verify Month 5 (May) has no bonus (Quarterly freq)
         m5_pos = df_pos.iloc[4]
-        self.assertAlmostEqual(m5_pos['Store_Labor'], 4050.0, places=1)
+        self.assertAlmostEqual(m5_pos['Store_Labor'], -base_labor_expected, places=1)
 
 if __name__ == '__main__':
     unittest.main()

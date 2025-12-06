@@ -8,7 +8,8 @@ from model import BusinessEvent, BASE_REVENUE_MONTHLY, BASE_COGS_PCT
 def initialize_session_state():
     # Core V1
     if 'operating_hours' not in st.session_state: st.session_state['operating_hours'] = 14
-    if 'manager_salary' not in st.session_state: st.session_state['manager_salary'] = 32000
+    if 'manager_wage_hourly' not in st.session_state: st.session_state['manager_wage_hourly'] = 20.0
+    if 'manager_weekly_hours' not in st.session_state: st.session_state['manager_weekly_hours'] = 40.0
     if 'hourly_wage' not in st.session_state: st.session_state['hourly_wage'] = 12
     if 'avg_staff' not in st.session_state: st.session_state['avg_staff'] = 1.0
     if 'enable_fountain' not in st.session_state: st.session_state['enable_fountain'] = False
@@ -114,7 +115,7 @@ def _render_file_management():
                     # 2. Apply Scalars
                     # V1 & V2 keys
                     keys_to_load = [
-                        'operating_hours', 'manager_salary', 'hourly_wage', 'avg_staff', 
+                        'operating_hours', 'manager_wage_hourly', 'manager_weekly_hours', 'hourly_wage', 'avg_staff', 
                         'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
                         'loan_amount', 'interest_rate', 'amortization_years',
                         'rental_income_res', 'rental_income_comm',
@@ -239,12 +240,22 @@ def _render_ops():
             help="Daily open hours. Direct multiplier for Staff Labor cost."
         )
         
-        st.number_input(
-            "Manager Annual Salary ($)",
-            min_value=0, step=1000,
-            key='manager_salary',
-            help="Fixed yearly cost (divided by 12). Industry Avg: $45k-$60k for small retail."
+        st.slider(
+            "Manager Hourly Wage ($/hr)",
+            min_value=12.0, max_value=50.0, step=0.5,
+            key='manager_wage_hourly'
         )
+        
+        st.slider(
+            "Manager Weekly Hours",
+            min_value=0, max_value=60, step=1,
+            key='manager_weekly_hours',
+            help="Hours the Manager is on the floor/working. These hours OFFSET the hourly staff requirement."
+        )
+        
+        # Readout
+        mgr_annual = st.session_state['manager_wage_hourly'] * st.session_state['manager_weekly_hours'] * 52
+        st.caption(f"Est. Manager Annual Salary: ${mgr_annual:,.0f}")
         
         st.slider(
             "Hourly Staff Wage ($/hr)",
@@ -522,7 +533,9 @@ def render_sidebar():
         "base_cogs_pct": BASE_COGS_PCT,
         
         "operating_hours": st.session_state['operating_hours'],
-        "manager_salary": st.session_state['manager_salary'],
+        "operating_hours": st.session_state['operating_hours'],
+        "manager_wage_hourly": st.session_state['manager_wage_hourly'],
+        "manager_weekly_hours": st.session_state['manager_weekly_hours'],
         "hourly_wage": st.session_state['hourly_wage'],
         "avg_staff": st.session_state['avg_staff'],
         
