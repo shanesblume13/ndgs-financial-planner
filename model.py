@@ -278,12 +278,8 @@ class FinancialModel:
             store_total_outflow_pre_bonus = store_cogs + store_labor + store_ops_expenses + store_rent_expense
             store_noi_pre_bonus = store_total_revenue - store_total_outflow_pre_bonus
             
-            # --- INCENTIVE CALCULATION ---
-            
-            bonus_payout = 0.0
-
             # Final Store Net
-            store_net_cash = store_noi_pre_bonus - bonus_payout - event_capex_store
+            store_net_cash = store_noi_pre_bonus - event_capex_store
 
             # --- PROPERTY OPERATION ---
             # Income
@@ -323,7 +319,7 @@ class FinancialModel:
                 "Store_Revenue": store_total_revenue,
                 "Store_COGS": -store_cogs,
                 "Store_Labor": -store_labor,
-                "Store_Bonus": -bonus_payout,
+
                 "Store_Ops_Ex": -store_ops_expenses,
                 "Ex_Util": -ex_util,
                 "Ex_Ins": -ex_ins,

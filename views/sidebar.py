@@ -4,6 +4,7 @@ import json
 import datetime
 import io
 from model import BusinessEvent, BASE_REVENUE_MONTHLY, BASE_COGS_PCT
+from services.ai_service import ask_ai
 
 def initialize_session_state():
     # Core V1
@@ -45,7 +46,8 @@ def initialize_session_state():
     if 'wage_growth' not in st.session_state: st.session_state['wage_growth'] = 3.0
     if 'rent_escalation' not in st.session_state: st.session_state['rent_escalation'] = 2.0
 
-
+    # New: Initial Capex
+    if 'initial_capex' not in st.session_state: st.session_state['initial_capex'] = 50000.0
 
     # V2: Events
     if 'events' not in st.session_state: st.session_state['events'] = []
@@ -53,8 +55,13 @@ def initialize_session_state():
     # Phase 16: Date Management
     if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date.today()
 
-def _render_file_management():
-    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=True):
+def render_sidebar():
+    initialize_session_state()
+    
+    # Placeholder for AI (Top of Sidebar)
+    ai_container = st.sidebar.container()
+    
+    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=False):
         st.write("Save your settings to a CSV file or restore from one.")
         
         # --- EXPORT ---
@@ -121,12 +128,12 @@ def _render_file_management():
                         'rental_income_res', 'rental_income_comm',
                         'seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
                         'rev_growth', 'exp_growth', 'wage_growth', 'rent_escalation',
-                        'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly'
+                        'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly',
+                        'initial_capex'
                     ]
                     
                     for k in keys_to_load:
                         if k in imported_data:
-                            # Infer type from current state default if possible, else float
                             try:
                                 if k in st.session_state and isinstance(st.session_state[k], int):
                                      st.session_state[k] = int(float(imported_data[k]))
@@ -136,7 +143,7 @@ def _render_file_management():
                                      # Fallback try generic
                                      st.session_state[k] = float(imported_data[k])
                             except:
-                                pass # Keep default if parse fail
+                                pass 
 
                     # Date
                     if 'start_date' in imported_data:
@@ -146,58 +153,12 @@ def _render_file_management():
                             pass
                     
                     # 3. Apply Events
-                    if 'events_data' in imported_data:
-                        try:
-                            # It's a JSON string
-                            raw_json = imported_data['events_data']
-                            # If it was double quoted in CSV it might have extra quotes? 
-                            # Simple split above might be fragile for complex JSON with commas.
-                            # Better approach: Use csv module.
-                            pass 
-                        except:
-                            pass
-
-                    # Robust CSV read
-                    # Re-reading using csv module to handle the JSON string correctly
-                    stringio.seek(0)
-                    import csv
-                    reader = csv.DictReader(stringio)
-                    # This expects Key, Value headers
-                    
-                    # Manual DictReader doesn't work well with K,V structure vertical.
-                    # Actually standard CSV reader is fine.
-                    stringio.seek(0)
-                    csv_reader = csv.reader(stringio)
-                    next(csv_reader, None) # Skip header
-                    
                     ev_data_list = []
                     
-                    for row in csv_reader:
-                        if len(row) < 2: continue
-                        k = row[0]
-                        v = row[1]
-                        
-                        if k == 'events_data':
-                            # Deserialize
-                            try:
-                                ev_data_list = json.loads(v)
-                            except:
-                                st.error("Failed to parse events data.")
-                        else:
-                             # Already handled scalars above broadly, or we can re-do carefully here.
-                             # Let's trust the scalar logic above but update it to use this robust loop?
-                             # Actually let's just use this loop for everything.
-                             if k in keys_to_load:
-                                try:
-                                    if k in st.session_state and isinstance(st.session_state[k], int):
-                                         st.session_state[k] = int(float(v))
-                                    elif k in st.session_state and isinstance(st.session_state[k], float):
-                                         st.session_state[k] = float(v)
-                                except: pass
-                             
-                             if k == 'start_date':
-                                 try: st.session_state['start_date'] = datetime.datetime.strptime(v, "%Y-%m-%d").date()
-                                 except: pass
+                    if 'events_data' in imported_data:
+                        try:
+                            ev_data_list = json.loads(imported_data['events_data'])
+                        except: pass
 
                     # Restore events
                     if ev_data_list:
@@ -209,330 +170,81 @@ def _render_file_management():
 
             except Exception as e:
                 st.error(f"Error parsing file: {e}")
+                
+    return ai_container
 
-
-
-def _render_acquisition():
-    with st.sidebar.expander("🏦 Acquisition & Rent"):
-        st.caption("Loan Parameters")
-        
-        # Date Input
-        st.session_state['start_date'] = st.date_input("Project Acquisition Date", value=st.session_state['start_date'])
-        
-        # New: Initial Capex
-        st.number_input("Initial Capex / Startup Costs ($)", value=50000.0, step=1000.0, key='initial_capex')
-
-        st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
-        st.number_input("Interest Rate (%)", step=0.1, format="%.2f", key='interest_rate')
-        st.number_input("Amortization (Years)", step=1, key='amortization_years')
-        
-        st.divider()
-        st.caption("Rental Income")
-        st.number_input("Commercial Rent ($/mo)", value=st.session_state['rental_income_comm'], step=100.0, key='rental_income_comm')
-        st.number_input("Residential Rent ($/mo)", value=st.session_state['rental_income_res'], step=100.0, key='rental_income_res')
-
-def _render_ops():
-    with st.sidebar.expander("👥 Operations & Staffing"):
-        st.slider(
-            "Daily Operating Hours",
-            min_value=6, max_value=24,
-            key='operating_hours',
-            help="Daily open hours. Direct multiplier for Staff Labor cost."
-        )
-        
-        st.slider(
-            "Manager Hourly Wage ($/hr)",
-            min_value=12.0, max_value=50.0, step=0.5,
-            key='manager_wage_hourly'
-        )
-        
-        st.slider(
-            "Manager Weekly Hours",
-            min_value=0, max_value=60, step=1,
-            key='manager_weekly_hours',
-            help="Hours the Manager is on the floor/working. These hours OFFSET the hourly staff requirement."
-        )
-        
-        # Readout
-        mgr_annual = st.session_state['manager_wage_hourly'] * st.session_state['manager_weekly_hours'] * 52
-        st.caption(f"Est. Manager Annual Salary: ${mgr_annual:,.2f}")
-        
-        st.slider(
-            "Hourly Staff Wage ($/hr)",
-            min_value=10, max_value=30,
-            key='hourly_wage',
-            help="Variable cost. Impacted by inflation/growth. Avg: $15-$20."
-        )
-        
-        st.slider(
-            "Avg Staff on Shift",
-            min_value=1.0, max_value=5.0, step=0.5,
-            key='avg_staff',
-            help="Staff count per hour. 1.5 = One full timer + one part timer overlap."
-        )
-
-def _render_growth_and_expenses():
-    with st.sidebar.expander("📈 Growth, Expenses & Seasonality"):
-        st.subheader("Seasonality (Q1-Q4 Multipliers)")
-        s_q1 = st.slider("Q1 (Winter)", 0.5, 1.5, key='seasonality_q1')
-        s_q2 = st.slider("Q2 (Spring)", 0.5, 1.5, key='seasonality_q2')
-        s_q3 = st.slider("Q3 (Summer)", 0.5, 1.5, key='seasonality_q3')
-        s_q4 = st.slider("Q4 (Fall/Holiday)", 0.5, 1.5, key='seasonality_q4')
-        
-        st.subheader("Annual Growth Rates")
-        rev_growth = st.slider("Revenue Growth (%)", -5.0, 10.0, st.session_state['rev_growth'], key='rev_growth')
-        exp_growth = st.slider("General Expense Inflation (%)", -5.0, 10.0, st.session_state['exp_growth'], key='exp_growth')
-        wage_growth = st.slider("Wage Growth (%)", 0.0, 10.0, key='wage_growth', help="Annual increase in hourly wages/salaries.")
-        rent_escalation = st.slider("Rent Escalation (%)", 0.0, 10.0, key='rent_escalation', help="Annual increase in Commercial Rent paid by Store.")
-        
-        st.subheader("Monthly Expenses Breakdown")
-        st.number_input("Utilities", step=50.0, key='util_monthly')
-        st.number_input("Insurance & Licenses", step=50.0, key='ins_monthly')
-        st.number_input("Maintenance", step=50.0, key='maint_monthly')
-        st.number_input("Marketing", step=50.0, key='mktg_monthly')
-        st.number_input("Professional Fees", step=50.0, key='prof_monthly')
-        
-        return [s_q1, s_q2, s_q3, s_q4], rev_growth, exp_growth, wage_growth, rent_escalation
-
-
-
-def _render_event_management():
-    # --- Edit Logic state management ---
-    if 'edit_event_idx' not in st.session_state:
-        st.session_state['edit_event_idx'] = None
-
-    # --- Events Form (Add/Edit) ---
-    form_expander = st.sidebar.expander("✨ Manage Events", expanded=True)
-    with form_expander:
-        is_edit_mode = st.session_state['edit_event_idx'] is not None
-        edit_idx = st.session_state['edit_event_idx']
-        
-        # Load values if editing
-        default_name = ""
-        default_start = 12
-        default_end = 120
-        default_val = 0.0
-        
-        # Default Indices for Selectboxes
-        idx_freq = 0
-        idx_entity = 0 
-        idx_target = 0
-        idx_val_type = 0
-        idx_basis = 0 # Default to Revenue
-
-        # Basis options
-        basis_options = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex", "NOI"]
-
-
-        if is_edit_mode and 'events_data' in st.session_state:
-            try:
-                # Safety check
-                if edit_idx < len(st.session_state['events_data']):
-                    ev = st.session_state['events_data'][edit_idx]
-                    default_name = ev.get('name', '')
-                    default_start = ev.get('start_month', 12)
-                    default_end = ev.get('end_month', 120)
-                    default_val = ev.get('value', 0.0)
-                    
-                    freqs = ["One-time", "Monthly", "Quarterly", "Annually"]
-                    if ev.get('frequency') in freqs: idx_freq = freqs.index(ev.get('frequency'))
-                    
-                    entities = ["Store", "Property"]
-                    if ev.get('affected_entity') in entities: idx_entity = entities.index(ev.get('affected_entity'))
-
-                    targets = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"]
-                    if ev.get('impact_target') in targets: idx_target = targets.index(ev.get('impact_target'))
-                    
-                    # Determine Value Type and Basis from potential legacy data
-                    raw_type = ev.get('value_type', "Fixed Amount ($)")
-                    
-                    if "Fixed" in raw_type:
-                        idx_val_type = 0 # Fixed
-                    elif "%" in raw_type or "Percent" in raw_type:
-                        idx_val_type = 1 # Percentage (%)
-                        # Try to find basis in stored 'pct_basis' OR infer from old string
-                        stored_basis = ev.get('pct_basis', None)
-                        if stored_basis == "Previous Quarter NOI": stored_basis = "NOI" # Migration
-                        
-                        if stored_basis and stored_basis in basis_options:
-                             idx_basis = basis_options.index(stored_basis)
-                        else:
-                            # Infer from legacy string (e.g. "% of Revenue")
-                            if "Revenue" in raw_type: idx_basis = basis_options.index("Revenue")
-                            elif "COGS" in raw_type: idx_basis = basis_options.index("COGS")
-                            elif "Ops" in raw_type: idx_basis = basis_options.index("Ops (Fixed)")
-                            elif "NOI" in raw_type: idx_basis = basis_options.index("NOI")
-
-            except Exception:
-                st.session_state['edit_event_idx'] = None # Reset on error
-                st.rerun()
-
-        form_title = f"Edit Event #{edit_idx+1}" if is_edit_mode else "Add New Event"
-        st.caption(form_title)
-
-        e_name = st.text_input("Event Name", value=default_name, placeholder="e.g. Renovation, Rent Hike")
-        
-        c1, c2 = st.columns(2)
-        e_start = c1.number_input("Start Month", 1, 120, default_start)
-        e_end = c2.number_input("End Month", 1, 120, default_end, help="Event stops after this month.")
-        
-        e_freq = st.selectbox("Frequency", ["One-time", "Monthly", "Quarterly", "Annually"], index=idx_freq)
-        
-        c3, c4 = st.columns(2)
-        e_entity = c3.selectbox("Entity", ["Store", "Property"], index=idx_entity)
-        e_target = c4.selectbox("Target", ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"], index=idx_target)
-        
-        # New split UI for Value Type + Basis
-        e_val_type_main = st.selectbox("Value Type", ["Fixed Amount ($)", "Percentage (%)"], index=idx_val_type)
-        
-        e_basis = "Revenue"
-        if e_val_type_main == "Percentage (%)":
-             e_basis = st.selectbox("Percentage Basis", basis_options, index=idx_basis)
-        
-        val_label = "Amount ($)" if e_val_type_main == "Fixed Amount ($)" else f"Percent (%) of {e_basis}" 
-        val_step = 100.0 if e_val_type_main == "Fixed Amount ($)" else 0.5
-        
-        e_val = st.number_input(val_label, value=float(default_val), step=val_step)
-        
-        c_act1, c_act2 = st.columns(2)
-        
-        if is_edit_mode:
-            if c_act1.button("💾 Update Event"):
-                if e_name:
-                    # Update existing
-                    new_event_dict = {
-                        "name": e_name,
-                        "start_month": int(e_start),
-                        "end_month": int(e_end),
-                        "frequency": e_freq,
-                        "impact_target": e_target,
-                        "value_type": e_val_type_main,
-                        "pct_basis": e_basis, # New field
-                        "value": float(e_val),
-                        "affected_entity": e_entity,
-                        "is_active": st.session_state['events_data'][edit_idx].get('is_active', True) # Preserve active state
-                    }
-                    st.session_state['events_data'][edit_idx] = new_event_dict
-                    st.session_state['edit_event_idx'] = None
-                    st.success("Updated!")
-                    st.rerun()
+def render_ai_cfo(container, df_projection, model_events, inputs_summary):
+    """Renders the AI CFO interface into the provided sidebar container."""
+    with container:
+        with st.expander("🤖 Ask the CFO (AI)", expanded=True):
+            # AI Config
+            ai_provider = st.selectbox("AI Provider", ["Google (Gemini)", "OpenAI", "Anthropic"], index=0, key="side_ai_provider")
             
-            if c_act2.button("❌ Cancel"):
-                st.session_state['edit_event_idx'] = None
-                st.rerun()
-
-        else:
-            if st.button("➕ Add Event"):
-                if e_name:
-                    new_event_dict = {
-                        "name": e_name,
-                        "start_month": int(e_start),
-                        "end_month": int(e_end),
-                        "frequency": e_freq,
-                        "impact_target": e_target,
-                        "value_type": e_val_type_main,
-                        "pct_basis": e_basis, # New field
-                        "value": float(e_val),
-                        "affected_entity": e_entity,
-                        "is_active": True
-                    }
-                    if 'events_data' not in st.session_state: st.session_state['events_data'] = []
-                    st.session_state['events_data'].append(new_event_dict)
-                    st.success(f"Added {e_name}!")
-                    st.rerun()
-
-    # List active events with Actions
-    if 'events_data' in st.session_state and st.session_state['events_data']:
-        with st.sidebar.expander("📅 Passive Events List", expanded=False):
-            st.warning("Use the form above to add events.")
-        
-        st.markdown("### Active Events")
-        for i, e in enumerate(st.session_state['events_data']):
-            with st.container():
-                c_info, c_acts = st.columns([0.7, 0.3])
+            user_api_key = ""
+            if ai_provider == "Google (Gemini)":
+                user_api_key = st.text_input("Gemini API Key", type="password", key="side_google_key", help="Leave blank if using Env Var")
+                ai_model = "gemini-2.0-flash-exp"
+            elif ai_provider == "OpenAI":
+                user_api_key = st.text_input("OpenAI API Key", type="password", key="side_openai_key")
+                ai_model = "gpt-4o"
+            else:
+                user_api_key = st.text_input("Anthropic API Key", type="password", key="side_anthropic_key")
+                ai_model = "claude-3-5-sonnet-20240620"
                 
-                # Info Column
-                e_active = e.get('is_active', True)
-                name_str = e.get('name')
-                if not e_active: name_str += " (Inactive)"
-                
-                target = e.get('impact_target', '?')
-                val = e.get('value', 0)
-                v_type = e.get('value_type', '$')
-                basis_info = ""
-                if "Percent" in v_type or "%" in v_type:
-                     # Check separate basis field or infer from old string type
-                     b = e.get('pct_basis', '')
-                     if not b: 
-                         # Fallback display for legacy
-                         b = v_type 
-                     basis_info = f"({b})"
+            st.caption(f"Model: {ai_model}")
+            
+            ai_config = {"provider": ai_provider, "api_key": user_api_key, "model_id": ai_model}
 
-                c_info.text(f"{name_str}")
-                c_info.caption(f"{target} | {e.get('frequency')}")
-                c_info.caption(f"{val} {v_type} {basis_info}")
+            user_q = st.text_area("Ask a question:", height=100, placeholder="e.g. How does increasing rent by 10% affect my ROI?")
+            
+            if st.button("Analyze", use_container_width=True):
+                if not user_q:
+                    st.warning("Please type a question.")
+                else:
+                    with st.spinner("Thinking..."):
+                        context = {
+                            "summary": inputs_summary,
+                            "data_head": df_projection.head(12).to_dict(),
+                            "totals": df_projection[['Store_Revenue', 'Store_Net', 'Prop_Net', 'Owner_Cash_Flow']].sum().to_dict(),
+                            "events": [e.__dict__ for e in model_events if e.is_active]
+                        }
+                        response = ask_ai(ai_config, context, user_q)
+                        st.info(response)
 
-                # Toggle
-                is_on = c_info.checkbox("Active", value=e_active, key=f"active_{i}")
-                if is_on != e_active:
-                    st.session_state['events_data'][i]['is_active'] = is_on
-                    st.rerun()
-
-                # Actions Column
-                if c_acts.button("✏️", key=f"edit_{i}", help="Edit this event"):
-                    st.session_state['edit_event_idx'] = i
-                    st.rerun()
-                
-                if c_acts.button("🗑️", key=f"del_{i}", help="Delete this event"):
-                    st.session_state['events_data'].pop(i)
-                    # If we deleted the one being edited, clear edit mode
-                    if st.session_state['edit_event_idx'] == i:
-                         st.session_state['edit_event_idx'] = None
-                    st.rerun()
-                    
-                st.divider()
-
-    # Reconstruct objects from dicts for the Engine
+def get_model_config():
+    """Constructs the configuration dictionary from session state."""
+    
+    # Reconstruct Event Objects
     events_objects = []
     if 'events_data' in st.session_state:
-        st.session_state['events'] = []
         for ed in st.session_state['events_data']:
-            # Double check for migration if needed, but UI adds new format
-            st.session_state['events'].append(BusinessEvent(
+            events_objects.append(BusinessEvent(
                  name=ed.get('name', 'Unnamed Event'),
                  start_month=ed.get('start_month', 1),
                  end_month=ed.get('end_month', 120),
                  frequency=ed.get('frequency', 'One-time'),
                  impact_target=ed.get('impact_target', 'Revenue'),
                  value_type=ed.get('value_type', 'Fixed Amount ($)'),
-                 pct_basis=ed.get('pct_basis', 'Revenue'), # Default if missing
+                 pct_basis=ed.get('pct_basis', 'Revenue'),
                  value=ed.get('value', 0.0),
                  affected_entity=ed.get('affected_entity', 'Store'),
                  is_active=ed.get('is_active', True)
             ))
-            events_objects.append(st.session_state['events'][-1])
-    return events_objects
-
-def render_sidebar():
-    initialize_session_state()
     
-    _render_file_management()
-    
-    _render_acquisition()
-    _render_ops()
-    seasonality, rev_growth, exp_growth, wage_growth, rent_escalation = _render_growth_and_expenses()
-    events_objects = _render_event_management()
-
     return {
-        "seasonality": seasonality,
-        "revenue_growth_rate": rev_growth,
-        "expense_growth_rate": exp_growth,
-        "wage_growth_rate": wage_growth,
-        "rent_escalation_rate": rent_escalation,
+        "seasonality": [
+            st.session_state['seasonality_q1'],
+            st.session_state['seasonality_q2'],
+            st.session_state['seasonality_q3'],
+            st.session_state['seasonality_q4']
+        ],
+        "revenue_growth_rate": st.session_state['rev_growth'],
+        "expense_growth_rate": st.session_state['exp_growth'],
+        "wage_growth_rate": st.session_state['wage_growth'],
+        "rent_escalation_rate": st.session_state['rent_escalation'],
         "base_revenue": BASE_REVENUE_MONTHLY,
         "base_cogs_pct": BASE_COGS_PCT,
         
-        "operating_hours": st.session_state['operating_hours'],
         "operating_hours": st.session_state['operating_hours'],
         "manager_wage_hourly": st.session_state['manager_wage_hourly'],
         "manager_weekly_hours": st.session_state['manager_weekly_hours'],
@@ -550,7 +262,6 @@ def render_sidebar():
         "amortization_years": st.session_state['amortization_years'],
         "commercial_rent_income": st.session_state['rental_income_comm'],
         "residential_rent_income": st.session_state['rental_income_res'],
-        
         
         "initial_capex": st.session_state['initial_capex'],
 

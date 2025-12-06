@@ -17,26 +17,35 @@ st.markdown("Dynamic acquisition modeling with Seasonality, Growth, and Event Pl
 
 # --- Controller Logic ---
 
-# 1. Get Inputs (View)
-# render_sidebar returns (config_dict, ai_config_dict)
-config = sidebar.render_sidebar() 
+# 1. Initialize State & File Management (Sidebar)
+# Returns a container placeholder for the AI component to use later
+ai_container = sidebar.render_sidebar() 
 
-# 2. Run Model (Logic)
-# Unpack config directly into Model
-# Extract start_date first as it's not a model field
+# 2. Get Configuration (State -> Dict)
+config = sidebar.get_model_config()
+
+# 3. Run Model (Logic)
 start_date = config.pop('start_date', None) 
 model = FinancialModel(**config)
 df_projection = model.calculate_projection(start_date=start_date, months=120)
 
-# 3. Render Output (View)
-# Pass results, metadata, and AI config to Dashboard
-# Create a summary of key inputs for the Dashboard/AI context display
+# 4. Render Output (View)
 inputs_summary = {
     "rev_growth": config['revenue_growth_rate'],
     "operating_hours": config['operating_hours'],
-    "loan_amount": config['loan_amount']
+    "loan_amount": config['loan_amount'],
+    "interest_rate": config['interest_rate'],
+    "avg_staff": config['avg_staff'],
+    "hourly_wage": config['hourly_wage'],
+    "revenue_growth_rate": config['revenue_growth_rate'],
+    "commercial_rent_income": config['commercial_rent_income'],
+    "residential_rent_income": config['residential_rent_income']
 }
 
+# 4a. Render AI CFO in Sidebar (now that we have data)
+sidebar.render_ai_cfo(ai_container, df_projection, model.events, inputs_summary)
+
+# 4b. Render Main Dashboard
 dashboard.render_dashboard(
     df_projection=df_projection, 
     model_events=model.events, 

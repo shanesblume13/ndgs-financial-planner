@@ -3,7 +3,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from services.ai_service import ask_ai
 
 def render_dashboard(df_projection, model_events, inputs_summary, start_date=None):
     
@@ -11,461 +10,405 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     if start_date is None: start_date = date.today()
 
     st.header("Financial Performance Dashboard")
-    # --- VIEW TOGGLE ---
-    st.markdown("---")
-    view_mode = st.radio("Financial View Level", ["Consolidated (Owner)", "Separated (Entities)"], horizontal=True)
+    
+    # --- TABS: INPUTS & DATA ---
+    tab_ops, tab_staff, tab_growth, tab_re, tab_events = st.tabs([
+        "⚙️ Operations", "👥 Staffing", "📈 Growth", "🏢 Real Estate", "✨ Events"
+    ])
+    
+    # 1. Operations Tab
+    with tab_ops:
+        st.caption("Operating Expenses & Fixed Costs")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.slider("Daily Operating Hours", 6, 24, key='operating_hours')
+            st.number_input("Utilities ($/mo)", step=50.0, key='util_monthly')
+            st.number_input("Insurance ($/mo)", step=50.0, key='ins_monthly')
+        with c2:
+            st.number_input("Maintenance ($/mo)", step=50.0, key='maint_monthly')
+            st.number_input("Marketing ($/mo)", step=50.0, key='mktg_monthly')
+            st.number_input("Professional Fees ($/mo)", step=50.0, key='prof_monthly')
+            
+        with st.expander("📄 Operating Data", expanded=True):
+             # Filter cols for Ops
+             ops_cols = ['Year', 'Store_Ops_Ex', 'Ex_Util', 'Ex_Ins', 'Ex_Maint', 'Ex_Mktg', 'Ex_Prof']
+             # Aggregate annual for readability in this context
+             df_ops = df_projection.groupby('Year')[ops_cols[1:]].sum().reset_index()
+             st.dataframe(df_ops.style.format("${:,.2f}", subset=ops_cols[1:]), use_container_width=True)
 
-    # --- PROJECTION CONTROLS ---
-    st.subheader("Projection Settings")
+    # 2. Staffing Tab
+    with tab_staff:
+        st.caption("Labor, Wages & Management")
+        c1, c2 = st.columns(2)
+        with c1:
+             st.slider("Avg Staff on Shift", 1.0, 5.0, 1.0, step=0.5, key='avg_staff')
+             st.slider("Hourly Staff Wage ($/hr)", 10, 30, key='hourly_wage')
+             st.slider("Wage Growth (%)", 0.0, 10.0, key='wage_growth')
+        with c2:
+             st.slider("Manager Hourly Wage ($/hr)", 12.0, 50.0, 0.5, key='manager_wage_hourly')
+             st.slider("Manager Weekly Hours", 0, 60, 1, key='manager_weekly_hours')
+             mgr_annual = st.session_state['manager_wage_hourly'] * st.session_state['manager_weekly_hours'] * 52
+             st.caption(f"Est. Manager Annual: ${mgr_annual:,.2f}")
+             
+        with st.expander("📄 Staffing Data", expanded=True):
+             lab_cols = ['Year', 'Store_Labor']
+             df_lab = df_projection.groupby('Year')[lab_cols[1:]].sum().reset_index()
+             st.dataframe(df_lab.style.format("${:,.2f}", subset=lab_cols[1:]), use_container_width=True)
+
+    # 3. Growth Tab
+    with tab_growth:
+         st.caption("Revenue Growth, Inflation & Seasonality")
+         c1, c2 = st.columns(2)
+         with c1:
+            st.slider("Revenue Growth (%)", -5.0, 10.0, key='rev_growth')
+            st.slider("Expense Inflation (%)", -5.0, 10.0, key='exp_growth')
+            st.slider("Rent Escalation (%)", 0.0, 10.0, key='rent_escalation')
+         with c2:
+            st.markdown("##### Seasonality Factors")
+            st.slider("Q1 (Winter)", 0.5, 1.5, key='seasonality_q1')
+            st.slider("Q2 (Spring)", 0.5, 1.5, key='seasonality_q2')
+            st.slider("Q3 (Summer)", 0.5, 1.5, key='seasonality_q3')
+            st.slider("Q4 (Fall)", 0.5, 1.5, key='seasonality_q4')
+            
+         with st.expander("📄 Growth Data", expanded=True):
+             growth_cols = ['Year', 'Store_Revenue', 'Store_COGS']
+             df_growth = df_projection.groupby('Year')[growth_cols[1:]].sum().reset_index()
+             st.dataframe(df_growth.style.format("${:,.2f}", subset=growth_cols[1:]), use_container_width=True)
+
+    # 4. Real Estate Tab
+    with tab_re:
+        st.caption("Acquisition, Loans & Rent")
+        c1, c2 = st.columns(2)
+        with c1:
+             st.date_input("Acquisition Date", key='start_date')
+             st.number_input("Initial Capex ($)", step=1000.0, key='initial_capex')
+             st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
+        with c2:
+             st.number_input("Interest Rate (%)", step=0.1, format="%.2f", key='interest_rate')
+             st.number_input("Amortization (Years)", step=1, key='amortization_years')
+             st.number_input("Comm. Rent ($/mo)", step=100.0, key='rental_income_comm')
+             st.number_input("Residential Rent ($/mo)", step=100.0, key='rental_income_res')
+             
+        with st.expander("📄 Property Data", expanded=True):
+             prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Prop_Cum']
+             df_prop = df_projection.groupby('Year')[prop_cols[1:]].sum().reset_index()
+             st.dataframe(df_prop.style.format("${:,.2f}", subset=prop_cols[1:]), use_container_width=True)
+
+    # 5. Events Tab
+    with tab_events:
+        st.caption("One-time or recurring events affecting the model")
+        _render_event_manager_ui()
+        # Table of active events is handled inside the UI render helper or can be added here
+        
+    st.divider()
+
+    # --- GLOBAL VISUALIZATIONS ---
+    st.subheader("Global Financial Analysis")
+    
+    # Global Controls
     c_proj1, c_proj2 = st.columns(2)
     time_horizon = c_proj1.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years")
-    # Aggregation Controls
+    
     if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Annual"
-    
-    st.caption("Data Granularity")
     b1, b2, b3 = c_proj2.columns(3)
-    if b1.button("Collapse All (Yearly)", use_container_width=True): st.session_state['view_agg'] = "Annual"
-    if b2.button("Expand Quarters", use_container_width=True): st.session_state['view_agg'] = "Quarterly"
-    if b3.button("Expand All (Monthly)", use_container_width=True): st.session_state['view_agg'] = "Monthly"
-    
+    if b1.button("Annual", use_container_width=True): st.session_state['view_agg'] = "Annual"
+    if b2.button("Quarterly", use_container_width=True): st.session_state['view_agg'] = "Quarterly"
+    if b3.button("Monthly", use_container_width=True): st.session_state['view_agg'] = "Monthly"
     aggregation = st.session_state['view_agg']
 
-    # Filter Data based on controls
-    # Use Project_Year for filtering (e.g. 1-10) to match "Time Horizon"
+    # Prep Data
     df_view = df_projection[df_projection['Project_Year'] <= time_horizon].copy()
+    
+    # Calculate EBITDA (Before aggregation)
+    # EBITDA = Rev + (COGS + Labor + Ops_Ex). Note: Expenses are negative in DF.
+    df_view['EBITDA'] = df_view['Store_Revenue'] + df_view['Store_COGS'] + df_view['Store_Labor'] + df_view['Store_Ops_Ex']
 
-    # Define aggregation dict for all potential columns
+    # Aggregation Logic (Shared)
     agg_dict = {
-        'Year': 'first', # Calendar Year (e.g. 2026)
-        'Quarter': 'first', # Calendar Quarter
-        'Month': 'first', # Calendar Month
-        'Project_Year': 'first', # Keep track
-        # Store Flow
-        'Store_Revenue': 'sum', 
-        'Store_COGS': 'sum',
-        'Store_Labor': 'sum',
-        'Store_Ops_Ex': 'sum',
-        'Ex_Util': 'sum',
-        'Ex_Ins': 'sum',
-        'Ex_Maint': 'sum',
-        'Ex_Mktg': 'sum',
-        'Ex_Prof': 'sum',
-        'Store_Rent_Ex': 'sum',
-        'Store_Bonus': 'sum',
-        'Store_NOI_Pre': 'sum', # New
-        'Store_Net': 'sum', 
-        # Prop Flow
-        'Prop_Debt': 'sum',
-        'Prop_Net': 'sum', 
-        # Owner Flow
-        'Owner_Cash_Flow': 'sum',
-        'Capex': 'sum',
-        # Cumulative (Last value)
-        'Store_Cum': 'last', 
-        'Prop_Cum': 'last', 
-        'Owner_Cum': 'last',
-        'Net_Event_Impact': 'sum'
+        'Store_Revenue': 'sum', 'Store_COGS': 'sum', 'Store_Labor': 'sum', 'Store_Ops_Ex': 'sum', 'Store_Net': 'sum',
+        'Prop_Net': 'sum', 'Owner_Cash_Flow': 'sum', 'Owner_Cum': 'last', 'EBITDA': 'sum'
     }
-
+    
     if aggregation == "Quarterly":
-        # Group by Year+Quarter 
-        # Create a transient grouper. "2026-Q2"
-        # We can just group by [Year, Quarter]
-        df_view = df_view.groupby(['Year', 'Quarter']).agg(agg_dict).reset_index(drop=True)
-        # Sort by Year, Quarter just in case
-        df_view.sort_values(by=['Year', 'Quarter'], inplace=True)
-        x_axis = df_view.apply(lambda row: f"Q{int(row['Quarter'])} {int(row['Year'])}", axis=1)
+        df_display = df_view.groupby(['Year', 'Quarter']).agg(agg_dict).reset_index()
+        x_axis = df_display.apply(lambda row: f"Q{int(row['Quarter'])} {int(row['Year'])}", axis=1)
     elif aggregation == "Annual":
         agg_dict.pop('Quarter', None)
-        agg_dict.pop('Month', None)
-        agg_dict.pop('Year', None) 
-        # Group by Year (Calendar)
-        df_view = df_view.groupby('Year').agg(agg_dict).reset_index()
-        x_axis = df_view['Year']
+        df_display = df_view.groupby('Year').agg(agg_dict).reset_index()
+        x_axis = df_display['Year']
     else:
-        # Monthly
-        x_axis = df_view.apply(lambda row: f"{date(int(row['Year']), int(row['Month']), 1).strftime('%b %Y')}", axis=1)
+         x_axis = df_view.apply(lambda row: f"{date(int(row['Year']), int(row['Month']), 1).strftime('%b %Y')}", axis=1)
+         df_display = df_view # Monthly is default granularity
 
-    # Calculate Total Cash Flow (Global Scope for AI)
-    total_cf = df_view['Owner_Cash_Flow'].sum()
+    # 1. Main Cash Flow Chart
+    total_cf = df_display['Owner_Cash_Flow'].sum()
+    st.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.2f}")
+    
+    fig_owner = go.Figure()
+    fig_owner.add_trace(go.Bar(
+        x=x_axis, y=df_display['Owner_Cash_Flow'], name='Periodic CF', 
+        marker_color='lightgreen', hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    fig_owner.add_trace(go.Scatter(
+        x=x_axis, y=df_display['Owner_Cum'], mode='lines', name='Cumulative', 
+        line=dict(color='darkgreen', width=3), yaxis='y2', 
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    if model_events:
+         _add_event_markers(fig_owner, model_events, aggregation, x_axis, start_date, time_horizon)
 
-    if view_mode == "Consolidated (Owner)":
-        # Owner View
-        st.header(f"Consolidated Snapshot ({time_horizon}-Year)")
-        
-        avg_cf_per_period = total_cf / len(df_view)
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.2f}")
-        c2.metric(f"Avg Cash Flow (Per {aggregation[:-2]})", f"${avg_cf_per_period:,.2f}")
-        
-        # KPI Row 2
-        # KPI Row 2
-        net_margin_agg = (df_view['Store_Net'].sum() / df_view['Store_Revenue'].sum()) * 100.0
-        # Prop NOI = Net + Debt Service (add back the negative debt to get pre-debt number)
-        # Since Debt is negative, we subtract it to add the magnitude back?
-        # Net (8) = NOI (10) + Debt (-2). -> NOI = Net - Debt. (8 - (-2) = 10). Correct.
-        prop_noi_agg = df_view['Prop_Net'].sum() - df_view['Prop_Debt'].sum()
-        
-        # DSCR = NOI / Debt Service (Positive)
-        denom = abs(df_view['Prop_Debt'].sum())
-        dscr_agg = prop_noi_agg / denom if denom > 0 else 0.0
-        
-        c3.metric("Avg Net Margin %", f"{net_margin_agg:.1f}%")
-        
-        c4, c5, c6 = st.columns(3)
-        c4.metric("Avg Property DSCR", f"{dscr_agg:.2f}x", help=">1.25x is healthy")
-        
-        # Detail Toggle
-        show_detail = st.checkbox("Show Detailed Breakdown (P&L)", value=False)
+    # Calculate aligned ranges for dual axis
+    y1_data = df_display['Owner_Cash_Flow']
+    y2_data = df_display['Owner_Cum']
+    
+    # Defaults
+    y1_min, y1_max = y1_data.min(), y1_data.max()
+    y2_min, y2_max = y2_data.min(), y2_data.max()
+    
+    # Add headroom
+    y1_max = max(0, y1_max * 1.1)
+    y1_min = min(0, y1_min * 1.1)
+    y2_max = max(0, y2_max * 1.1)
+    y2_min = min(0, y2_min * 1.1)
 
-        with st.expander("View Data Detail", expanded=True):
-            if show_detail:
-                # Detailed Column Order
-                # 1. Prepare Base Data
-                cols = [
-                    "Year",
-                    "Month", 
-                    "Quarter",
-                    # Store Operations Group
-                    "Store_Revenue", "Store_COGS", "Store_Labor", "Store_Rent_Ex", "Store_Ops_Ex", "Store_NOI_Pre",
-                    # Detailed Expenses Group
-                    "Ex_Util", "Ex_Ins", "Ex_Maint", "Ex_Mktg", "Ex_Prof",
-                    # Investment
-                    "Capex",
-                    # Bottom Line
-                    "Net_Event_Impact", # Add new column
-                    "Store_Net", "Prop_Net", "Owner_Cash_Flow"
-                ]
-                
-                df_display = df_view.copy()
-                # Ensure all cols exist
-                final_cols = [c for c in cols if c in df_display.columns]
-                df_display = df_display[final_cols].copy()
-                
-                # 2. Rename Columns for Friendliness
-                rename_map = {
-                    "Year": ("Time", "Year"),
-                    "Month": ("Time", "Month"),
-                    "Quarter": ("Time", "Quarter"),
-                    "Store_Revenue": ("Store Operations", "Revenue"),
-                    "Store_COGS": ("Store Operations", "COGS"),
-                    "Store_Labor": ("Store Operations", "Total Labor"),
-                    "Store_Bonus": ("Store Operations", "Manager Bonus"),
-                    "Store_Ops_Ex": ("Store Operations", "Total OpEx"),
-                    "Store_NOI_Pre": ("Store Operations", "NOI"), # New
-                    "Ex_Util": ("Detailed Expenses", "Utilities"),
-                    "Ex_Ins": ("Detailed Expenses", "Insurance"),
-                    "Ex_Maint": ("Detailed Expenses", "Maintenance"),
-                    "Ex_Mktg": ("Detailed Expenses", "Marketing"),
-                    "Ex_Prof": ("Detailed Expenses", "Professional"),
-                    "Store_Rent_Ex": ("Store Operations", "Rent Paid"),
-                    "Capex": ("Investment", "Capex"),
-                    "Net_Event_Impact": ("Bottom Line", "Event Adjustments"),
-                    "Store_Net": ("Bottom Line", "Store Net"),
-                    "Prop_Net": ("Bottom Line", "Property Net"),
-                    "Owner_Cash_Flow": ("Bottom Line", "Total Owner CF")
-                }
-                
-                # Check which keys exist (due to dynamic cols)
-                final_rename = {k: v for k, v in rename_map.items() if k in df_display.columns}
-                df_display.rename(columns=final_rename, inplace=True)
-                
-                # 3. Create MultiIndex Columns
-                df_display.columns = pd.MultiIndex.from_tuples(df_display.columns)
-                
-                # Apply format only to numeric columns
-                numeric_cols = df_display.select_dtypes(include=['float', 'int']).columns
-                exclude_cols = [c for c in numeric_cols if c[0] == "Time"] # MultiIndex check
-                numeric_cols = [c for c in numeric_cols if c not in exclude_cols]
-                
-                st.dataframe(
-                    df_display.style.format("${:,.2f}", subset=numeric_cols),
-                    width="stretch"
-                )
-                st.caption("Note: 'Detailed Expenses' breaks down the 'Total OpEx' figure.")
-            else:
-                # Simple Column Order
-                cols = ["Year", "Store_Revenue", "Store_Net", "Prop_Net", "Owner_Cash_Flow", "Owner_Cum"]
-                if aggregation == "Monthly": cols.insert(1, "Month")
-                if aggregation == "Quarterly": cols.insert(1, "Quarter")
-                
-                # Filter cols
-                final_cols = [c for c in cols if c in df_view.columns]
-                
-                st.dataframe(
-                    df_view[final_cols].style.format("${:,.2f}"),
-                    width="stretch"
-                )
-
-        # Interactive Waterfall Section (Moved up for visibility)
-        st.subheader("Profit Anatomy (Waterfall)")
-        c_w_sel, _ = st.columns([1, 3])
-        # Select Calendar Year not Project Year
-        available_years = sorted(df_view['Year'].unique())
-        water_year = c_w_sel.selectbox("Select Year for Waterfall", available_years)
+    # Calculate ratios (Top / Bottom)
+    # Avoid div by zero
+    y1_top = y1_max
+    y1_bot = abs(y1_min) if y1_min < 0 else 0
+    
+    y2_top = y2_max
+    y2_bot = abs(y2_min) if y2_min < 0 else 0
+    
+    # Determine the dominating ratio to fit both
+    # We want Top/Bot to be the same K for both.
+    # K must be >= max(K1, K2) to fit data.
+    
+    # Logic: 
+    # If both are all positive: Min is 0. Easy.
+    # If mixed:
+    # K1 = Top1 / Bot1
+    # K2 = Top2 / Bot2
+    # Target K = max(K1, K2)
+    # Then adjust the non-binding axis bounds.
+    
+    range1 = [y1_min, y1_max]
+    range2 = [y2_min, y2_max]
+    
+    if y1_bot > 0 and y2_bot > 0:
+        k1 = y1_top / y1_bot
+        k2 = y2_top / y2_bot
+        target_k = max(k1, k2)
         
-        y_data = df_projection[df_projection['Year']==water_year].sum()
+        # Adjust Y1
+        if k1 < target_k:
+            # Need more top space
+            y1_max_new = y1_bot * target_k
+            range1 = [y1_min, y1_max_new]
         
-        fig_water = go.Figure(go.Waterfall(
-            name = f"Year {water_year}", orientation = "v",
-            measure = ["relative", "relative", "relative", "relative", "relative", "relative", "total", "relative", "total"],
-            x = ["Revenue", "COGS", "Labor", "Ops", "Rent", "Capex", "Store Net", "+ Prop Net", "Owner CF"],
-            textposition = "outside",
-            y = [
-                y_data['Store_Revenue'], 
-                -y_data['Store_COGS'], 
-                -y_data['Store_Labor'], 
-                -y_data['Store_Ops_Ex'], 
-                -y_data['Store_Rent_Ex'], 
-                -y_data['Capex'], 
-                None, 
-                y_data['Prop_Net'],
-                None 
-            ],
-            connector = {"line":{"color":"rgb(63, 63, 63)"}},
-        ))
-        
-        fig_water.update_layout(
-                title = f"Year {water_year} Profit Flow",
-                showlegend = False,
-                height=400
-        )
-        st.plotly_chart(fig_water, width="stretch", key="chart_waterfall_interactive")
-
-
-            
-        st.subheader(f"{time_horizon}-Year Consolidated Projection")
-        fig_owner = go.Figure()
-        # Bar for periodic flow
-        fig_owner.add_trace(go.Bar(x=x_axis, y=df_view['Owner_Cash_Flow'], name='Periodic CF', marker_color='lightgreen'))
-        # Line for cumulative
-        fig_owner.add_trace(go.Scatter(x=x_axis, y=df_view['Owner_Cum'], mode='lines', name='Cumulative', line=dict(color='darkgreen', width=3), yaxis='y2'))
-        
-        # Add Vertical Lines for Events
-        if model_events:
-            for e in model_events:
-                if e.is_active:
-                    # Find x-location. 
-                    # If Monthly: Month (e.start_month) -> "Jan 20xx" ? x_axis is Month (1-120).
-                    # If Annual: Year (e.start_month // 12 + 1) -> x_axis is Year (1-10).
-                    # We need to map approx location.
-                    
-                    x_loc = None
-                    if aggregation == "Monthly":
-                        if e.start_month <= len(x_axis):
-                            x_loc = e.start_month 
-                    elif aggregation == "Annual":
-                        y_start = (e.start_month - 1) // 12 + 1
-                        if y_start <= time_horizon:
-                            x_loc = y_start
-                    elif aggregation == "Quarterly":
-                         # Quarter index (1-40)
-                         q_start = (e.start_month - 1) // 3 + 1
-                         # x_axis is "Q{abs_quarter}" ? No, x_axis is "Q1", "Q2" .. logic in line 60.
-                         # Line 60: x_axis = df_view['Abs_Quarter'].apply(lambda x: f"Q{x}")
-                         # Actually Abs_Quarter is int.
-                         # Wait, df_view is aggregated. len(df_view) should match len(x_axis).
-                         # We need to find the index where 'Abs_Quarter' == q_start
-                         if q_start in df_view['Abs_Quarter'].values:
-                             x_loc = f"Q{q_start}" 
-
-                    if x_loc:
-                        fig_owner.add_vline(x=x_loc, line_width=1, line_dash="dash", line_color="red", opacity=0.5)
-                        fig_owner.add_annotation(x=x_loc, y=0, text=e.name, showarrow=False, yref='paper', yanchor='bottom', textangle=-90, font=dict(color="red"))
-        
-        fig_owner.update_layout(
-            yaxis=dict(title="Periodic Cash Flow"),
-            yaxis2=dict(title="Cumulative Cash Flow", overlaying='y', side='right'),
-            title=f"Owner Cash Flow: Periodic vs Cumulative ({aggregation})",
-            hovermode="x unified"
-        )
-        st.plotly_chart(fig_owner, width="stretch", key="chart_owner_cf")
-        
-        # --- METRIC EXPLORER ---
-        st.subheader("Interactive Metric Explorer")
-        st.caption("Select any financial metrics to visualize trends and event correlations.")
-        
-        # Get all valid numeric columns (excluding metadata)
-        all_numeric = [c for c in df_view.columns if c not in ['Year', 'Month', 'Quarter', 'Project_Year', 'Abs_Quarter', 'Display_Date']]
-        default_selections = ['Store_Revenue', 'Store_Net']
-        
-        selected_metrics = st.multiselect("Select Metrics", all_numeric, default=[c for c in default_selections if c in all_numeric])
-        
-        if selected_metrics:
-            fig_explore = go.Figure()
-            
-            for metric in selected_metrics:
-                fig_explore.add_trace(go.Scatter(
-                    x=x_axis, 
-                    y=df_view[metric], 
-                    mode='lines+markers', 
-                    name=metric
-                ))
-
-            # --- Event Overlay (Reused Logic) ---
-            if model_events:
-                 for e in model_events:
-                    if e.is_active:
-                        # Logic matched to Owner Chart above
-                        event_date = start_date + relativedelta(months=e.start_month - 1)
-                        e_year = event_date.year
-                        e_q = (event_date.month - 1) // 3 + 1
-                        
-                        x_loc = None
-                        if aggregation == "Monthly":
-                            label = event_date.strftime('%b %Y')
-                            if label in x_axis.values: x_loc = label
-                        elif aggregation == "Annual":
-                            if e_year in x_axis.values: x_loc = e_year
-                        elif aggregation == "Quarterly":
-                             label = f"Q{e_q} {e_year}"
-                             if label in x_axis.values: x_loc = label
-                        
-                        if x_loc:
-                            fig_explore.add_vline(x=x_loc, line_width=1, line_dash="dash", line_color="orange", opacity=0.5)
-                            # Only add annotation if it's the first trace to avoid clutter? Or just add it.
-                            # Standard plotly handles annotation overlap poorly, but vertical text is okay.
-                            fig_explore.add_annotation(
-                                x=x_loc, y=0, text=e.name, 
-                                showarrow=False, yref='paper', yanchor='bottom', 
-                                textangle=-90, font=dict(color="orange")
-                            )
-
-            fig_explore.update_layout(
-                title="Metric Trends & Event Impact",
-                hovermode="x unified",
-                yaxis_title="Amount ($)",
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
-            st.plotly_chart(fig_explore, width="stretch", key="chart_explorer")
-
-
-        # --- NEW VISUALIZATIONS ---
-        
-        # 1. Expense Breakdown (Stacked)
-        st.subheader("Cost Structure Analysis")
-        c_exp, c_marg = st.columns(2)
-        
-        with c_exp:
-            st.caption("Expense Breakdown by Category")
-            fig_stack = go.Figure()
-            # Stacks
-            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_COGS'], name='COGS'))
-            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_Labor'], name='Labor'))
-            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_Rent_Ex'], name='Rent'))
-            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Store_Ops_Ex'], name='Ops & Fixed'))
-            fig_stack.add_trace(go.Bar(x=x_axis, y=df_view['Prop_Debt'], name='Debt Service (Prop)'))
-            
-            fig_stack.update_layout(barmode='stack', legend=dict(orientation="h", y=-0.2))
-            st.plotly_chart(fig_stack, width="stretch", key="chart_expense_stack")
-            
-        with c_marg:
-            st.caption("Profit Margin Trends")
-            # Calculate Margin %
-            # Avoid div by zero
-            df_view['Net_Margin_Pct'] = (df_view['Store_Net'] / df_view['Store_Revenue'].replace(0, 1)) * 100.0
-            
-            fig_marg = go.Figure()
-            fig_marg.add_trace(go.Scatter(x=x_axis, y=df_view['Net_Margin_Pct'], mode='lines+markers', name='Net Margin %', line=dict(color='purple', width=3)))
-            
-            # Add Prop DSCR if applicable
-            # DSCR = NOI / Debt
-            # Prop NOI = Prop Income - Prop Ops. Prop Net = NOI - Debt. So NOI = Prop Net + Debt.
-            # Actually Prop Net in model includes debt deduction.
-            if df_view['Prop_Debt'].sum() > 0:
-                 df_view['Prop_NOI'] = df_view['Prop_Net'] + df_view['Prop_Debt']
-                 df_view['DSCR'] = df_view['Prop_NOI'] / df_view['Prop_Debt'].replace(0, 1)
-                 fig_marg.add_trace(go.Scatter(x=x_axis, y=df_view['DSCR'], mode='lines', name='Prop DSCR (x)', yaxis='y2', line=dict(dash='dot', color='orange')))
-            
-            fig_marg.update_layout(
-                yaxis=dict(title="Net Margin %"),
-                yaxis2=dict(title="DSCR (x)", overlaying='y', side='right'),
-                hovermode="x unified",
-                legend=dict(orientation="h", y=-0.2)
-            )
-            st.plotly_chart(fig_marg, width="stretch", key="chart_margin_trend")
-
-
-
-    else:
-        # Separated View
-        st.header(f"Entity Breakdown ({time_horizon}-Year)")
-        
-        col_store, col_prop = st.columns(2)
-        
-        store_net_total = df_view['Store_Net'].sum()
-        prop_net_total = df_view['Prop_Net'].sum()
-        
-        with col_store:
-            st.subheader("🏬 General Store (OpCo)")
-            st.metric(f"Total Net Cash ({time_horizon}y)", f"${store_net_total:,.2f}")
-            
-            fig_store = go.Figure()
-            fig_store.add_trace(go.Bar(x=x_axis, y=df_view['Store_Net'], name='Store Net', marker_color='blue'))
-            st.plotly_chart(fig_store, width="stretch", key="chart_store")
-            
-        with col_prop:
-            st.subheader("🏢 Property (Holding Co)")
-            st.metric(f"Total Net Cash ({time_horizon}y)", f"${prop_net_total:,.2f}")
-            
-            fig_prop = go.Figure()
-            fig_prop.add_trace(go.Bar(x=x_axis, y=df_view['Prop_Net'], name='Prop Net', marker_color='orange'))
-            st.plotly_chart(fig_prop, width="stretch", key="chart_prop")
-
-        st.subheader(f"{time_horizon}-Year Entity Cumulative Growth")
-        fig_cum_split = go.Figure()
-        fig_cum_split.add_trace(go.Scatter(x=x_axis, y=df_view['Store_Cum'], name='Store Cumulative', line=dict(color='blue')))
-        fig_cum_split.add_trace(go.Scatter(x=x_axis, y=df_view['Prop_Cum'], name='Prop Cumulative', line=dict(color='orange')))
-        st.plotly_chart(fig_cum_split, width="stretch")
-
-    # --- AI Consultant ---
-    st.markdown("---")
-    st.subheader("Ask the CFO (AI Consultant)")
-
-    with st.expander("AI Financial Analyst", expanded=True):
-        # AI Config Section (Relocated)
-        c_ai_conf1, c_ai_conf2, c_ai_conf3 = st.columns([1, 2, 1])
-        
-        with c_ai_conf1:
-            ai_provider = st.selectbox("AI Provider", ["Google (Gemini)", "OpenAI", "Anthropic"], index=0, key="dash_ai_provider")
-        
-        with c_ai_conf2:
-             # Match keys to what logic likely expects or just handle locally
-            if ai_provider == "Google (Gemini)":
-                user_api_key = st.text_input("Gemini API Key", type="password", key="dash_google_key", help="Leave blank if using Env Var")
-                ai_model = "gemini-2.0-flash-exp"
-            elif ai_provider == "OpenAI":
-                user_api_key = st.text_input("OpenAI API Key", type="password", key="dash_openai_key")
-                ai_model = "gpt-4o"
-            else:
-                user_api_key = st.text_input("Anthropic API Key", type="password", key="dash_anthropic_key")
-                ai_model = "claude-3-5-sonnet-20240620"
-        
-        with c_ai_conf3:
-             # Simplified model selection or keep robust? Let's keep it simple for dashboard space
-             st.caption(f"Model: {ai_model}")
+        # Adjust Y2
+        if k2 < target_k:
+             y2_max_new = y2_bot * target_k
+             range2 = [y2_min, y2_max_new]
              
-        ai_config = {
-            "provider": ai_provider,
-            "api_key": user_api_key,
-            "model_id": ai_model
-        }
-
-        user_q = st.text_area("Ask a question about your scenario:", height=70)
+    elif y1_bot == 0 and y2_bot > 0:
+        # Y1 is all positive, Y2 is mixed.
+        # Zero line for Y2 is somewhere in middle.
+        # Zero line for Y1 is at bottom.
+        # To align, Y1 must extend down to match Y2's ratio.
+        # K2 = Top2 / Bot2.
+        # Y1 needs Bot1 such that Top1 / Bot1 = K2.
+        # Bot1 = Top1 / K2.
+        range1 = [-y1_top / (y2_top/y2_bot), y1_top]
         
-        if st.button("Analyze Scenario"):
-            if not user_q:
-                st.warning("Please type a question.")
-            else:
-                with st.spinner("Analyzing financial data..."):
-                    # Prepare Context
-                    context = {
-                        "summary": inputs_summary,
-                        "data_head": df_projection.head(12).to_dict(), # First year monthly
-                        "totals": df_projection[['Store_Revenue', 'Store_Net', 'Prop_Net', 'Owner_Cash_Flow']].sum().to_dict(),
-                        "events": [e.__dict__ for e in model_events if e.is_active]
+    elif y1_bot > 0 and y2_bot == 0:
+        # Y2 all positive, Y1 mixed.
+        # Y2 needs space below.
+        range2 = [-y2_top / (y1_top/y1_bot), y2_top]
+
+    fig_owner.update_layout(
+        yaxis=dict(title="Periodic Cash Flow", range=range1),
+        yaxis2=dict(title="Cumulative Cash Flow", overlaying='y', side='right', range=range2),
+        title=f"Owner Cash Flow: Periodic vs Cumulative ({aggregation})",
+        hovermode="x unified",
+        height=400,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+    st.plotly_chart(fig_owner, width="stretch", key="glob_chart_cf")
+
+    # 2. Profitability Analysis (EBITDA vs Net)
+    st.subheader("Profitability Trends")
+    fig_ebitda = go.Figure()
+    fig_ebitda.add_trace(go.Scatter(
+        x=x_axis, y=df_display['EBITDA'], name='EBITDA', 
+        line=dict(color='purple', width=3, dash='dash'), 
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    fig_ebitda.add_trace(go.Bar(
+        x=x_axis, y=df_display['Store_Net'], name='Net Profit (Post-Rent/Capex)', 
+        marker_color='blue', 
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    fig_ebitda.update_layout(title="EBITDA vs Net Profit", hovermode="x unified", legend=dict(orientation="h", y=1.1))
+    st.plotly_chart(fig_ebitda, width="stretch", key="glob_chart_ebitda")
+
+    # 3. Expense Stack & Profit
+    c_chart1, c_chart2 = st.columns(2)
+    
+    with c_chart1:
+        fig_stack = go.Figure()
+        fig_stack.add_trace(go.Bar(x=x_axis, y=df_display['Store_COGS'], name='COGS', hovertemplate='$%{y:,.2f}<extra></extra>'))
+        fig_stack.add_trace(go.Bar(x=x_axis, y=df_display['Store_Labor'], name='Labor', hovertemplate='$%{y:,.2f}<extra></extra>'))
+        fig_stack.add_trace(go.Bar(x=x_axis, y=df_display['Store_Ops_Ex'], name='Ops Expenses', hovertemplate='$%{y:,.2f}<extra></extra>'))
+        fig_stack.update_layout(barmode='stack', title="Expense Structure", legend=dict(orientation="h", y=-0.2))
+        st.plotly_chart(fig_stack, use_container_width=True)
+        
+    with c_chart2:
+        fig_prof = go.Figure()
+        fig_prof.add_trace(go.Scatter(x=x_axis, y=df_display['Store_Net'], name='Store Net', line=dict(color='blue'), hovertemplate='$%{y:,.2f}<extra></extra>'))
+        fig_prof.add_trace(go.Scatter(x=x_axis, y=df_display['Prop_Net'], name='Prop Net', line=dict(color='orange'), hovertemplate='$%{y:,.2f}<extra></extra>'))
+        fig_prof.update_layout(title="Net Profit by Entity", legend=dict(orientation="h", y=-0.2))
+        st.plotly_chart(fig_prof, use_container_width=True)
+        
+    # 4. Detailed Table (Restored)
+    st.divider()
+    with st.expander("📄 Financial Model Source Data (Detailed)", expanded=False):
+        # Format all float columns
+        float_cols = [c for c in df_projection.columns if df_projection[c].dtype == 'float64']
+        st.dataframe(df_projection.style.format("${:,.2f}", subset=float_cols), width="stretch")
+
+
+# --- HELPER FUNCTIONS ---
+def _add_event_markers(fig, model_events, aggregation, x_axis, start_date, time_horizon):
+    """Helper to add vertical event lines to a Plotly figure."""
+    for e in model_events:
+        if e.is_active:
+            event_date = start_date + relativedelta(months=e.start_month - 1)
+            e_year = event_date.year
+            e_q = (event_date.month - 1) // 3 + 1
+            
+            x_loc = None
+            if aggregation == "Monthly":
+                label = event_date.strftime('%b %Y')
+                if label in x_axis.values: x_loc = label
+            elif aggregation == "Annual":
+                if e_year in x_axis.values: x_loc = e_year
+            elif aggregation == "Quarterly":
+                    label = f"Q{e_q} {e_year}"
+                    if label in x_axis.values: x_loc = label
+            
+            if x_loc:
+                fig.add_vline(x=x_loc, line_width=1, line_dash="dash", line_color="red", opacity=0.5)
+
+def _render_event_manager_ui():
+    """Renders the Event CRUD UI"""
+    if 'edit_event_idx' not in st.session_state:
+        st.session_state['edit_event_idx'] = None
+
+    c_form, c_list = st.columns([1, 1])
+    
+    with c_form:
+        st.markdown("#### Add / Edit Event")
+        is_edit_mode = st.session_state['edit_event_idx'] is not None
+        edit_idx = st.session_state['edit_event_idx']
+        
+        # Load values
+        default_name = ""
+        default_start = 12
+        default_end = 120
+        default_val = 0.0
+        idx_freq = 0
+        idx_entity = 0 
+        idx_target = 0
+        idx_val_type = 0
+        idx_basis = 0
+        
+        basis_options = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex", "NOI"]
+
+        if is_edit_mode and 'events_data' in st.session_state:
+             if edit_idx < len(st.session_state['events_data']):
+                ev = st.session_state['events_data'][edit_idx]
+                default_name = ev.get('name', '')
+                default_start = ev.get('start_month', 12)
+                default_end = ev.get('end_month', 120)
+                default_val = ev.get('value', 0.0)
+                
+                freqs = ["One-time", "Monthly", "Quarterly", "Annually"]
+                if ev.get('frequency') in freqs: idx_freq = freqs.index(ev.get('frequency'))
+                
+                entities = ["Store", "Property"]
+                if ev.get('affected_entity') in entities: idx_entity = entities.index(ev.get('affected_entity'))
+
+                targets = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"]
+                if ev.get('impact_target') in targets: idx_target = targets.index(ev.get('impact_target'))
+                
+                raw_type = ev.get('value_type', "Fixed Amount ($)")
+                if "Fixed" in raw_type: idx_val_type = 0 
+                elif "Percent" in raw_type: idx_val_type = 1
+                
+                stored_basis = ev.get('pct_basis', 'Revenue')
+                if stored_basis in basis_options: idx_basis = basis_options.index(stored_basis)
+
+        e_name = st.text_input("Event Name", value=default_name, placeholder="e.g. Renovation")
+        
+        c1, c2 = st.columns(2)
+        e_start = c1.number_input("Start Month", 1, 120, default_start)
+        e_end = c2.number_input("End Month", 1, 120, default_end)
+        
+        e_freq = st.selectbox("Frequency", ["One-time", "Monthly", "Quarterly", "Annually"], index=idx_freq)
+        
+        c3, c4 = st.columns(2)
+        e_entity = c3.selectbox("Entity", ["Store", "Property"], index=idx_entity)
+        e_target = c4.selectbox("Target", ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"], index=idx_target)
+        
+        e_val_type_main = st.selectbox("Value Type", ["Fixed Amount ($)", "Percentage (%)"], index=idx_val_type)
+        e_basis = "Revenue"
+        if e_val_type_main == "Percentage (%)":
+             e_basis = st.selectbox("Basis", basis_options, index=idx_basis)
+        
+        val_step = 100.0 if e_val_type_main == "Fixed Amount ($)" else 0.5
+        e_val = st.number_input("Value", value=float(default_val), step=val_step)
+        
+        if is_edit_mode:
+            if st.button("💾 Update Event"):
+                if e_name:
+                    new_event_dict = {
+                        "name": e_name, "start_month": int(e_start), "end_month": int(e_end),
+                        "frequency": e_freq, "impact_target": e_target, "value_type": e_val_type_main,
+                        "pct_basis": e_basis, "value": float(e_val), "affected_entity": e_entity,
+                        "is_active": st.session_state['events_data'][edit_idx].get('is_active', True)
                     }
-                    
-                    response = ask_ai(ai_config, context, user_q)
-                    st.info(response)
+                    st.session_state['events_data'][edit_idx] = new_event_dict
+                    st.session_state['edit_event_idx'] = None
+                    st.rerun()
+            if st.button("❌ Cancel"):
+                st.session_state['edit_event_idx'] = None
+                st.rerun()
+        else:
+            if st.button("➕ Add Event"):
+                if e_name:
+                    new_event_dict = {
+                        "name": e_name, "start_month": int(e_start), "end_month": int(e_end),
+                        "frequency": e_freq, "impact_target": e_target, "value_type": e_val_type_main,
+                        "pct_basis": e_basis, "value": float(e_val), "affected_entity": e_entity,
+                        "is_active": True
+                    }
+                    if 'events_data' not in st.session_state: st.session_state['events_data'] = []
+                    st.session_state['events_data'].append(new_event_dict)
+                    st.rerun()
+
+    with c_list:
+        st.markdown("#### Active Events")
+        if 'events_data' in st.session_state and st.session_state['events_data']:
+            for i, e in enumerate(st.session_state['events_data']):
+                with st.container():
+                     c_txt, c_btn = st.columns([0.8, 0.2])
+                     c_txt.text(f"{e['name']} ({e['value']})")
+                     if c_btn.button("✏️", key=f"tbl_edit_{i}"):
+                         st.session_state['edit_event_idx'] = i
+                         st.rerun()
+                     if c_btn.button("🗑️", key=f"tbl_del_{i}"):
+                         st.session_state['events_data'].pop(i)
+                         if st.session_state['edit_event_idx'] == i: st.session_state['edit_event_idx'] = None
+                         st.rerun()
