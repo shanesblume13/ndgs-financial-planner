@@ -96,8 +96,8 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         avg_cf_per_period = total_cf / len(df_view)
         
         c1, c2, c3 = st.columns(3)
-        c1.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.0f}")
-        c2.metric(f"Avg Cash Flow (Per {aggregation[:-2]})", f"${avg_cf_per_period:,.0f}")
+        c1.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.2f}")
+        c2.metric(f"Avg Cash Flow (Per {aggregation[:-2]})", f"${avg_cf_per_period:,.2f}")
         
         # KPI Row 2
         # KPI Row 2
@@ -180,7 +180,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
                 numeric_cols = [c for c in numeric_cols if c not in exclude_cols]
                 
                 st.dataframe(
-                    df_display.style.format("${:,.0f}", subset=numeric_cols),
+                    df_display.style.format("${:,.2f}", subset=numeric_cols),
                     width="stretch"
                 )
                 st.caption("Note: 'Detailed Expenses' breaks down the 'Total OpEx' figure.")
@@ -194,7 +194,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
                 final_cols = [c for c in cols if c in df_view.columns]
                 
                 st.dataframe(
-                    df_view[final_cols].style.format("${:,.0f}"),
+                    df_view[final_cols].style.format("${:,.2f}"),
                     width="stretch"
                 )
 
@@ -399,7 +399,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         
         with col_store:
             st.subheader("🏬 General Store (OpCo)")
-            st.metric(f"Total Net Cash ({time_horizon}y)", f"${store_net_total:,.0f}")
+            st.metric(f"Total Net Cash ({time_horizon}y)", f"${store_net_total:,.2f}")
             
             fig_store = go.Figure()
             fig_store.add_trace(go.Bar(x=x_axis, y=df_view['Store_Net'], name='Store Net', marker_color='blue'))
@@ -407,7 +407,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
             
         with col_prop:
             st.subheader("🏢 Property (Holding Co)")
-            st.metric(f"Total Net Cash ({time_horizon}y)", f"${prop_net_total:,.0f}")
+            st.metric(f"Total Net Cash ({time_horizon}y)", f"${prop_net_total:,.2f}")
             
             fig_prop = go.Figure()
             fig_prop.add_trace(go.Bar(x=x_axis, y=df_view['Prop_Net'], name='Prop Net', marker_color='orange'))

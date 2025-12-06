@@ -255,7 +255,7 @@ def _render_ops():
         
         # Readout
         mgr_annual = st.session_state['manager_wage_hourly'] * st.session_state['manager_weekly_hours'] * 52
-        st.caption(f"Est. Manager Annual Salary: ${mgr_annual:,.0f}")
+        st.caption(f"Est. Manager Annual Salary: ${mgr_annual:,.2f}")
         
         st.slider(
             "Hourly Staff Wage ($/hr)",

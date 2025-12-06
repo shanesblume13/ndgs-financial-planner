@@ -87,8 +87,8 @@ class FinancialModel:
         # Initial Capex
         initial_capex_cost = self.initial_capex
 
-        cumulative_cash_owner = -initial_capex_cost
-        cumulative_cash_store = -initial_capex_cost
+        cumulative_cash_owner = 0.0
+        cumulative_cash_store = 0.0
         cumulative_cash_prop = 0.0
         
 
@@ -342,7 +342,7 @@ class FinancialModel:
                 "Owner_Cum": cumulative_cash_owner,
                 "Owner_Cash_Flow": consolidated_cash,
                 
-                "Capex": -(initial_capex_cost if m == 1 else total_event_capex),
+                "Capex": -total_event_capex,
                 "Net_Event_Impact": net_event_impact,
                 "Store_NOI_Pre": store_noi_pre_bonus
             }
