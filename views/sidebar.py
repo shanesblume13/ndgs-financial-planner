@@ -2,8 +2,8 @@ import streamlit as st
 import os
 import json
 import datetime
+import io
 from model import BusinessEvent, BASE_REVENUE_MONTHLY, BASE_COGS_PCT
-from utils.storage import load_scenarios, save_scenario
 
 def initialize_session_state():
     # Core V1
@@ -52,138 +52,164 @@ def initialize_session_state():
     # Phase 16: Date Management
     if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date.today()
 
-def _render_scenario_management():
-    with st.sidebar.expander("📂 Scenario Management", expanded=True):
-        scenarios = load_scenarios()
-        scenario_names = ["Current Custom"] + list(scenarios.keys())
-        selected_scenario = st.selectbox("Load Scenario", scenario_names)
+def _render_file_management():
+    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=True):
+        st.write("Save your settings to a CSV file or restore from one.")
+        
+        # --- EXPORT ---
+        # 1. Gather Data
+        current_state = {k: st.session_state[k] for k in st.session_state.keys() if k not in ['events', 'events_data']}
+        # Serialize events
+        events_data = []
+        if 'events' in st.session_state:
+            for e in st.session_state['events']:
+                events_data.append({
+                    "name": e.name, 
+                    "start_month": e.start_month, 
+                    "end_month": e.end_month,
+                    "frequency": e.frequency,
+                    "impact_target": e.impact_target,
+                    "pct_basis": e.pct_basis,
+                    "value_type": e.value_type,
+                    "value": e.value,
+                    "affected_entity": e.affected_entity,
+                    "is_active": e.is_active
+                })
+        current_state['events_data'] = json.dumps(events_data) # JSON String for CSV safety
+        
+        # 2. Convert to CSV
+        csv_data = []
+        for k, v in current_state.items():
+            # Handle date object
+            val = v
+            if isinstance(v, (datetime.date, datetime.datetime)):
+                val = v.strftime("%Y-%m-%d")
+            csv_data.append(f"{k},{val}")
+        
+        csv_string = "Key,Value\n" + "\n".join(csv_data)
+        
+        # 3. Download Button
+        st.download_button(
+            label="💾 Download Settings (CSV)",
+            data=csv_string,
+            file_name="financial_planner_settings.csv",
+            mime="text/csv"
+        )
+        
+        st.divider()
 
-        if st.button("Load Scenario"):
-            if selected_scenario != "Current Custom":
-                data = scenarios[selected_scenario]
-                # V1
-                for k in ['operating_hours', 'manager_salary', 'hourly_wage', 'avg_staff', 
-                          'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
-                          'loan_amount', 'interest_rate', 'amortization_years']:
-                    if k in data: st.session_state[k] = data[k]
+        # --- IMPORT ---
+        uploaded_file = st.file_uploader("Upload Settings CSV", type=['csv'])
+        if uploaded_file is not None:
+            try:
+                # 1. Parse CSV
+                stringio = io.StringIO(uploaded_file.getvalue().decode("utf-8"))
+                imported_data = {}
+                for line in stringio:
+                    if "," not in line or line.startswith("Key,Value"): continue
+                    key, val = line.strip().split(",", 1)
+                    imported_data[key] = val
                 
-                # Helper for Rent Migration
-                if 'rental_income' in data: # Legacy single field
-                    st.session_state['rental_income_res'] = data['rental_income']
-                    st.session_state['rental_income_comm'] = 0.0
-                else:
-                    if 'rental_income_res' in data: st.session_state['rental_income_res'] = data['rental_income_res']
-                    if 'rental_income_comm' in data: st.session_state['rental_income_comm'] = data['rental_income_comm']
-
-                # V2
-                for k in ['seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
-                          'rev_growth', 'exp_growth',
-                          'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly']:
-                    if k in data: st.session_state[k] = data[k]
+                if st.button("Apply Uploaded Settings"):
+                    # 2. Apply Scalars
+                    # V1 & V2 keys
+                    keys_to_load = [
+                        'operating_hours', 'manager_salary', 'hourly_wage', 'avg_staff', 
+                        'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
+                        'loan_amount', 'interest_rate', 'amortization_years',
+                        'rental_income_res', 'rental_income_comm',
+                        'seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
+                        'rev_growth', 'exp_growth', 'wage_growth', 'rent_escalation',
+                        'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly'
+                    ]
                     
-                # Events (V2 Robust)
-                if 'events_data' in data:
-                    st.session_state['events'] = []
-                    for ed in data['events_data']:
-                        # Handle legacy events (migration)
-                        if 'one_time_cost' in ed:
-                            # Convert legacy to new format
-                            val = 0.0
-                            target = "Capex"
-                            if ed.get('one_time_cost', 0) > 0:
-                                val = ed['one_time_cost']
-                                target = "Capex"
-                            elif ed.get('recurring_cost_change', 0) > 0:
-                                val = ed['recurring_cost_change']
-                                target = "Ops (Fixed)"
-                            elif ed.get('revenue_change', 0) > 0:
-                                val = ed['revenue_change']
-                                target = "Revenue"
-                                
-                            st.session_state['events'].append(BusinessEvent(
-                                name=ed['name'],
-                                start_month=ed['start_month'],
-                                end_month=120,
-                                frequency="One-time" if target=="Capex" else "Monthly",
-                                impact_target=target,
-                                value_type="Fixed Amount ($)",
-                                value=val,
-                                affected_entity="Store" # Default
-                            ))
+                    for k in keys_to_load:
+                        if k in imported_data:
+                            # Infer type from current state default if possible, else float
+                            try:
+                                if k in st.session_state and isinstance(st.session_state[k], int):
+                                     st.session_state[k] = int(float(imported_data[k]))
+                                elif k in st.session_state and isinstance(st.session_state[k], float):
+                                     st.session_state[k] = float(imported_data[k])
+                                else:
+                                     # Fallback try generic
+                                     st.session_state[k] = float(imported_data[k])
+                            except:
+                                pass # Keep default if parse fail
+
+                    # Date
+                    if 'start_date' in imported_data:
+                         try:
+                            st.session_state['start_date'] = datetime.datetime.strptime(imported_data['start_date'], "%Y-%m-%d").date()
+                         except:
+                            pass
+                    
+                    # 3. Apply Events
+                    if 'events_data' in imported_data:
+                        try:
+                            # It's a JSON string
+                            raw_json = imported_data['events_data']
+                            # If it was double quoted in CSV it might have extra quotes? 
+                            # Simple split above might be fragile for complex JSON with commas.
+                            # Better approach: Use csv module.
+                            pass 
+                        except:
+                            pass
+
+                    # Robust CSV read
+                    # Re-reading using csv module to handle the JSON string correctly
+                    stringio.seek(0)
+                    import csv
+                    reader = csv.DictReader(stringio)
+                    # This expects Key, Value headers
+                    
+                    # Manual DictReader doesn't work well with K,V structure vertical.
+                    # Actually standard CSV reader is fine.
+                    stringio.seek(0)
+                    csv_reader = csv.reader(stringio)
+                    next(csv_reader, None) # Skip header
+                    
+                    ev_data_list = []
+                    
+                    for row in csv_reader:
+                        if len(row) < 2: continue
+                        k = row[0]
+                        v = row[1]
+                        
+                        if k == 'events_data':
+                            # Deserialize
+                            try:
+                                ev_data_list = json.loads(v)
+                            except:
+                                st.error("Failed to parse events data.")
                         else:
-                            # New format
-                            st.session_state['events'].append(BusinessEvent(
-                                name=ed['name'],
-                                start_month=ed['start_month'],
-                                end_month=ed.get('end_month', 120),
-                                frequency=ed.get('frequency', 'One-time'),
-                                impact_target=ed.get('impact_target', 'Revenue'),
-                                value_type=ed.get('value_type', 'Fixed Amount ($)'),
-                                value=ed.get('value', 0.0),
-                                affected_entity=ed.get('affected_entity', 'Store')
-                            ))
-                else:
-                     st.session_state['events'] = [] # Clear if no events
-                
-                if 'start_date' in data:
-                    try:
-                        st.session_state['start_date'] = datetime.datetime.strptime(data['start_date'], "%Y-%m-%d").date()
-                    except:
-                        st.session_state['start_date'] = datetime.date.today()
+                             # Already handled scalars above broadly, or we can re-do carefully here.
+                             # Let's trust the scalar logic above but update it to use this robust loop?
+                             # Actually let's just use this loop for everything.
+                             if k in keys_to_load:
+                                try:
+                                    if k in st.session_state and isinstance(st.session_state[k], int):
+                                         st.session_state[k] = int(float(v))
+                                    elif k in st.session_state and isinstance(st.session_state[k], float):
+                                         st.session_state[k] = float(v)
+                                except: pass
+                             
+                             if k == 'start_date':
+                                 try: st.session_state['start_date'] = datetime.datetime.strptime(v, "%Y-%m-%d").date()
+                                 except: pass
 
-                st.rerun()
+                    # Restore events
+                    if ev_data_list:
+                        st.session_state['events_data'] = ev_data_list # Logic for UI list
+                        st.session_state['events'] = [] # Logic for engine will rebuild in _render_events
+                    
+                    st.success("Settings Restored!")
+                    st.rerun()
 
-        st.info("Note: Scenarios are saved temporarily to disk. On cloud deployments, they may be lost on restart.")
-        new_scenario_name = st.text_input("Save Current as New Scenario")
-        if st.button("Save Scenario"):
-            if new_scenario_name:
-                # Save V2 state
-                current_state = {k: st.session_state[k] for k in st.session_state.keys() if k not in ['events', 'events_data']}
-                # Serialize events manually
-                events_data = []
-                for e in st.session_state['events']:
-                    events_data.append({
-                        "name": e.name, 
-                        "start_month": e.start_month, 
-                        "end_month": e.end_month,
-                        "frequency": e.frequency,
-                        "impact_target": e.impact_target,
-                        "value_type": e.value_type,
-                        "value": e.value,
-                        "affected_entity": e.affected_entity,
-                        "is_active": e.is_active
-                    })
-                current_state['events_data'] = events_data
-                current_state['start_date'] = st.session_state['start_date'].strftime("%Y-%m-%d")
-                save_scenario(new_scenario_name, current_state)
-                st.success(f"Saved scenario: {new_scenario_name}")
+            except Exception as e:
+                st.error(f"Error parsing file: {e}")
 
-def _render_ai_config():
-    ai_config = {}
-    with st.sidebar.expander("🤖 AI Configuration"):
-        ai_provider = st.selectbox("AI Provider", ["Google (Gemini)", "OpenAI", "Anthropic"], index=0, key="ai_provider")
-        
-        user_api_key = ""
-        ai_model = ""
-        
-        if ai_provider == "Google (Gemini)":
-            user_api_key = st.text_input("Gemini API Key", type="password", key="google_key", help="Leave blank to use GOOGLE_API_KEY environment variable.")
-            ai_model = st.selectbox("Model", ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash"], index=0, key="google_model")
-            
-        elif ai_provider == "OpenAI":
-            user_api_key = st.text_input("OpenAI API Key", type="password", key="openai_key", help="Leave blank to use OPENAI_API_KEY environment variable.")
-            ai_model = st.selectbox("Model", ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"], index=0, key="openai_model")
-            
-        elif ai_provider == "Anthropic":
-            user_api_key = st.text_input("Anthropic API Key", type="password", key="anthropic_key", help="Leave blank to use ANTHROPIC_API_KEY environment variable.")
-            ai_model = st.selectbox("Model", ["claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307"], index=0, key="anthropic_model")
-        
-        ai_config = {
-            "provider": ai_provider,
-            "api_key": user_api_key,
-            "model_id": ai_model
-        }
-    return ai_config
+
 
 def _render_acquisition():
     with st.sidebar.expander("🏦 Acquisition & Rent"):
@@ -192,6 +218,9 @@ def _render_acquisition():
         # Date Input
         st.session_state['start_date'] = st.date_input("Project Acquisition Date", value=st.session_state['start_date'])
         
+        # New: Initial Capex
+        st.number_input("Initial Capex / Startup Costs ($)", value=50000.0, step=1000.0, key='initial_capex')
+
         st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
         st.number_input("Interest Rate (%)", step=0.1, format="%.2f", key='interest_rate')
         st.number_input("Amortization (Years)", step=1, key='amortization_years')
@@ -278,6 +307,11 @@ def _render_event_management():
         idx_entity = 0 
         idx_target = 0
         idx_val_type = 0
+        idx_basis = 0 # Default to Revenue
+
+        # Basis options
+        basis_options = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex", "NOI"]
+
 
         if is_edit_mode and 'events_data' in st.session_state:
             try:
@@ -298,8 +332,26 @@ def _render_event_management():
                     targets = ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"]
                     if ev.get('impact_target') in targets: idx_target = targets.index(ev.get('impact_target'))
                     
-                    vtypes = ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"]
-                    if ev.get('value_type') in vtypes: idx_val_type = vtypes.index(ev.get('value_type'))
+                    # Determine Value Type and Basis from potential legacy data
+                    raw_type = ev.get('value_type', "Fixed Amount ($)")
+                    
+                    if "Fixed" in raw_type:
+                        idx_val_type = 0 # Fixed
+                    elif "%" in raw_type or "Percent" in raw_type:
+                        idx_val_type = 1 # Percentage (%)
+                        # Try to find basis in stored 'pct_basis' OR infer from old string
+                        stored_basis = ev.get('pct_basis', None)
+                        if stored_basis == "Previous Quarter NOI": stored_basis = "NOI" # Migration
+                        
+                        if stored_basis and stored_basis in basis_options:
+                             idx_basis = basis_options.index(stored_basis)
+                        else:
+                            # Infer from legacy string (e.g. "% of Revenue")
+                            if "Revenue" in raw_type: idx_basis = basis_options.index("Revenue")
+                            elif "COGS" in raw_type: idx_basis = basis_options.index("COGS")
+                            elif "Ops" in raw_type: idx_basis = basis_options.index("Ops (Fixed)")
+                            elif "NOI" in raw_type: idx_basis = basis_options.index("NOI")
+
             except Exception:
                 st.session_state['edit_event_idx'] = None # Reset on error
                 st.rerun()
@@ -319,10 +371,17 @@ def _render_event_management():
         e_entity = c3.selectbox("Entity", ["Store", "Property"], index=idx_entity)
         e_target = c4.selectbox("Target", ["Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"], index=idx_target)
         
-        e_val_type = st.selectbox("Value Type", ["Fixed Amount ($)", "% of Revenue", "% of COGS", "% of Ops", "% of Previous Quarter NOI"], index=idx_val_type)
+        # New split UI for Value Type + Basis
+        e_val_type_main = st.selectbox("Value Type", ["Fixed Amount ($)", "Percentage (%)"], index=idx_val_type)
         
-        val_help = "Enter absolute dollar amount" if "Fixed" in e_val_type else "Enter percentage (e.g. 5.0 for 5%)"
-        e_val = st.number_input("Value", value=float(default_val), step=10.0 if "Fixed" in e_val_type else 0.5, help=val_help)
+        e_basis = "Revenue"
+        if e_val_type_main == "Percentage (%)":
+             e_basis = st.selectbox("Percentage Basis", basis_options, index=idx_basis)
+        
+        val_label = "Amount ($)" if e_val_type_main == "Fixed Amount ($)" else f"Percent (%) of {e_basis}" 
+        val_step = 100.0 if e_val_type_main == "Fixed Amount ($)" else 0.5
+        
+        e_val = st.number_input(val_label, value=float(default_val), step=val_step)
         
         c_act1, c_act2 = st.columns(2)
         
@@ -336,7 +395,8 @@ def _render_event_management():
                         "end_month": int(e_end),
                         "frequency": e_freq,
                         "impact_target": e_target,
-                        "value_type": e_val_type,
+                        "value_type": e_val_type_main,
+                        "pct_basis": e_basis, # New field
                         "value": float(e_val),
                         "affected_entity": e_entity,
                         "is_active": st.session_state['events_data'][edit_idx].get('is_active', True) # Preserve active state
@@ -359,7 +419,8 @@ def _render_event_management():
                         "end_month": int(e_end),
                         "frequency": e_freq,
                         "impact_target": e_target,
-                        "value_type": e_val_type,
+                        "value_type": e_val_type_main,
+                        "pct_basis": e_basis, # New field
                         "value": float(e_val),
                         "affected_entity": e_entity,
                         "is_active": True
@@ -387,9 +448,18 @@ def _render_event_management():
                 target = e.get('impact_target', '?')
                 val = e.get('value', 0)
                 v_type = e.get('value_type', '$')
-                
+                basis_info = ""
+                if "Percent" in v_type or "%" in v_type:
+                     # Check separate basis field or infer from old string type
+                     b = e.get('pct_basis', '')
+                     if not b: 
+                         # Fallback display for legacy
+                         b = v_type 
+                     basis_info = f"({b})"
+
                 c_info.text(f"{name_str}")
-                c_info.caption(f"{target} | {e.get('frequency')} | {val}")
+                c_info.caption(f"{target} | {e.get('frequency')}")
+                c_info.caption(f"{val} {v_type} {basis_info}")
 
                 # Toggle
                 is_on = c_info.checkbox("Active", value=e_active, key=f"active_{i}")
@@ -424,6 +494,7 @@ def _render_event_management():
                  frequency=ed.get('frequency', 'One-time'),
                  impact_target=ed.get('impact_target', 'Revenue'),
                  value_type=ed.get('value_type', 'Fixed Amount ($)'),
+                 pct_basis=ed.get('pct_basis', 'Revenue'), # Default if missing
                  value=ed.get('value', 0.0),
                  affected_entity=ed.get('affected_entity', 'Store'),
                  is_active=ed.get('is_active', True)
@@ -434,14 +505,13 @@ def _render_event_management():
 def render_sidebar():
     initialize_session_state()
     
-    _render_scenario_management()
-    ai_config = _render_ai_config()
+    _render_file_management()
+    
     _render_acquisition()
     _render_ops()
     seasonality, rev_growth, exp_growth, wage_growth, rent_escalation = _render_growth_and_expenses()
     events_objects = _render_event_management()
 
-    # Return Config Dict
     return {
         "seasonality": seasonality,
         "revenue_growth_rate": rev_growth,
@@ -468,9 +538,10 @@ def render_sidebar():
         "commercial_rent_income": st.session_state['rental_income_comm'],
         "residential_rent_income": st.session_state['rental_income_res'],
         
-
         
+        "initial_capex": st.session_state['initial_capex'],
+
         "start_date": st.session_state['start_date'],
         
         "events": events_objects
-    }, ai_config
+    }

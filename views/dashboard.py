@@ -5,7 +5,7 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from services.ai_service import ask_ai
 
-def render_dashboard(df_projection, model_events, ai_config, inputs_summary, start_date=None):
+def render_dashboard(df_projection, model_events, inputs_summary, start_date=None):
     
     # Defaults
     if start_date is None: start_date = date.today()
@@ -19,15 +19,27 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
     st.subheader("Projection Settings")
     c_proj1, c_proj2 = st.columns(2)
     time_horizon = c_proj1.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years")
-    aggregation = c_proj2.selectbox("Aggregation", ["Monthly", "Quarterly", "Annual"], index=2)
+    # Aggregation Controls
+    if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Annual"
+    
+    st.caption("Data Granularity")
+    b1, b2, b3 = c_proj2.columns(3)
+    if b1.button("Collapse All (Yearly)", use_container_width=True): st.session_state['view_agg'] = "Annual"
+    if b2.button("Expand Quarters", use_container_width=True): st.session_state['view_agg'] = "Quarterly"
+    if b3.button("Expand All (Monthly)", use_container_width=True): st.session_state['view_agg'] = "Monthly"
+    
+    aggregation = st.session_state['view_agg']
 
     # Filter Data based on controls
-    df_view = df_projection[df_projection['Year'] <= time_horizon].copy()
+    # Use Project_Year for filtering (e.g. 1-10) to match "Time Horizon"
+    df_view = df_projection[df_projection['Project_Year'] <= time_horizon].copy()
 
     # Define aggregation dict for all potential columns
     agg_dict = {
-        'Year': 'first',
-        'Quarter': 'first',
+        'Year': 'first', # Calendar Year (e.g. 2026)
+        'Quarter': 'first', # Calendar Quarter
+        'Month': 'first', # Calendar Month
+        'Project_Year': 'first', # Keep track
         # Store Flow
         'Store_Revenue': 'sum', 
         'Store_COGS': 'sum',
@@ -40,6 +52,7 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         'Ex_Prof': 'sum',
         'Store_Rent_Ex': 'sum',
         'Store_Bonus': 'sum',
+        'Store_NOI_Pre': 'sum', # New
         'Store_Net': 'sum', 
         # Prop Flow
         'Prop_Debt': 'sum',
@@ -55,17 +68,23 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
     }
 
     if aggregation == "Quarterly":
-        # Group by quarters (custom accumulation)
-        df_view['Abs_Quarter'] = ((df_view['Year'] - 1) * 4) + df_view['Quarter']
-        df_view = df_view.groupby('Abs_Quarter').agg(agg_dict).reset_index()
-        x_axis = df_view['Abs_Quarter'].apply(lambda x: f"Q{x}")
+        # Group by Year+Quarter 
+        # Create a transient grouper. "2026-Q2"
+        # We can just group by [Year, Quarter]
+        df_view = df_view.groupby(['Year', 'Quarter']).agg(agg_dict).reset_index(drop=True)
+        # Sort by Year, Quarter just in case
+        df_view.sort_values(by=['Year', 'Quarter'], inplace=True)
+        x_axis = df_view.apply(lambda row: f"Q{int(row['Quarter'])} {int(row['Year'])}", axis=1)
     elif aggregation == "Annual":
         agg_dict.pop('Quarter', None)
-        agg_dict.pop('Year', None) # Remove Year from agg since it's the grouper
+        agg_dict.pop('Month', None)
+        agg_dict.pop('Year', None) 
+        # Group by Year (Calendar)
         df_view = df_view.groupby('Year').agg(agg_dict).reset_index()
         x_axis = df_view['Year']
     else:
-        x_axis = df_view['Month']
+        # Monthly
+        x_axis = df_view.apply(lambda row: f"{date(int(row['Year']), int(row['Month']), 1).strftime('%b %Y')}", axis=1)
 
     # Calculate Total Cash Flow (Global Scope for AI)
     total_cf = df_view['Owner_Cash_Flow'].sum()
@@ -81,9 +100,16 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         c2.metric(f"Avg Cash Flow (Per {aggregation[:-2]})", f"${avg_cf_per_period:,.0f}")
         
         # KPI Row 2
+        # KPI Row 2
         net_margin_agg = (df_view['Store_Net'].sum() / df_view['Store_Revenue'].sum()) * 100.0
-        prop_noi_agg = df_view['Prop_Net'].sum() + df_view['Prop_Debt'].sum()
-        dscr_agg = prop_noi_agg / df_view['Prop_Debt'].sum() if df_view['Prop_Debt'].sum() > 0 else 0.0
+        # Prop NOI = Net + Debt Service (add back the negative debt to get pre-debt number)
+        # Since Debt is negative, we subtract it to add the magnitude back?
+        # Net (8) = NOI (10) + Debt (-2). -> NOI = Net - Debt. (8 - (-2) = 10). Correct.
+        prop_noi_agg = df_view['Prop_Net'].sum() - df_view['Prop_Debt'].sum()
+        
+        # DSCR = NOI / Debt Service (Positive)
+        denom = abs(df_view['Prop_Debt'].sum())
+        dscr_agg = prop_noi_agg / denom if denom > 0 else 0.0
         
         c3.metric("Avg Net Margin %", f"{net_margin_agg:.1f}%")
         
@@ -96,12 +122,13 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         with st.expander("View Data Detail", expanded=True):
             if show_detail:
                 # Detailed Column Order
-                # Detailed Column Order & MultiIndex Mapping
                 # 1. Prepare Base Data
                 cols = [
-                    "Year", 
+                    "Year",
+                    "Month", 
+                    "Quarter",
                     # Store Operations Group
-                    "Store_Revenue", "Store_COGS", "Store_Labor", "Store_Bonus", "Store_Rent_Ex", "Store_Ops_Ex",
+                    "Store_Revenue", "Store_COGS", "Store_Labor", "Store_Rent_Ex", "Store_Ops_Ex", "Store_NOI_Pre",
                     # Detailed Expenses Group
                     "Ex_Util", "Ex_Ins", "Ex_Maint", "Ex_Mktg", "Ex_Prof",
                     # Investment
@@ -112,61 +139,13 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                 ]
                 
                 df_display = df_view.copy()
-
-                if aggregation == "Monthly":
-                    # Calculator helper
-                    def get_display_date(m_idx, y_idx):
-                        # m_idx is 1-based total month? No, Month column resets?
-                        # Wait, df_projection has 'Month' 1-12 usually.
-                        # Actually 'Month' is 1-based relative to Year usually?
-                        # Let's check model.py logic:
-                        # "Month": m (1 to 120)
-                        # So 'Month' in input df is Cumulative Month (1-120).
-                        # Perfect.
-                        if 'Month' in x:
-                             # Use cumulative month if available or calculate from Year/Month
-                             pass
-                             
-                    # The 'Month' column in df_display comes from df_view which has 'Month' and 'Year'.
-                    # In monthly view, 'Month' is 1-12 relative to year? Or 1-120?
-                    # model.py: projection.append({"Month": m, "Year": current_year ...})
-                    # m is 1 to 120. So Month is cumulative.
-                    
-                    df_display["Display_Date"] = df_display.apply(
-                        lambda x: (start_date + relativedelta(months=int(x['Month'])-1)).strftime("%b %Y"), 
-                        axis=1
-                    )
-                    cols.insert(1, "Display_Date")
-                elif aggregation == "Quarterly":
-                    # Quarter is 1-4. Year is 1-10.
-                    # We need start of quarter date.
-                    # Month index approx: (Year-1)*12 + (Quarter-1)*3
-                    df_display["Display_Date"] = df_display.apply(
-                        lambda x: (start_date + relativedelta(months=((int(x['Year'])-1)*12 + (int(x['Quarter'])-1)*3))).strftime("Q%q %Y"),
-                        axis=1
-                    )
-                    # Actually strftime %q is not standard.
-                    # Let's stick to "Q1 2026"
-                    df_display["Display_Date"] = df_display.apply(
-                        lambda row: f"Q{int(row['Quarter'])} " + (start_date + relativedelta(years=int(row['Year'])-1)).strftime("%Y"),
-                        axis=1
-                    )
-                    cols.insert(1, "Display_Date")
-                else:
-                    # Annual
-                    pass
-                
-                # Filter to final list (ensure Display_Date is picked up)
-                # But wait, cols has 'Year' at 0.
-                # If Monthly: [Year, Display_Date, Store_Rev...] -> (Time, Year), (Time, Date), (Store, Rev) -> Good.
-                # If Quarterly: [Year, Display_Date, Store_Rev...] -> Good.
-                
-                df_display = df_display[cols].copy()
+                # Ensure all cols exist
+                final_cols = [c for c in cols if c in df_display.columns]
+                df_display = df_display[final_cols].copy()
                 
                 # 2. Rename Columns for Friendliness
                 rename_map = {
                     "Year": ("Time", "Year"),
-                    "Display_Date": ("Time", "Date"),
                     "Month": ("Time", "Month"),
                     "Quarter": ("Time", "Quarter"),
                     "Store_Revenue": ("Store Operations", "Revenue"),
@@ -174,6 +153,7 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                     "Store_Labor": ("Store Operations", "Total Labor"),
                     "Store_Bonus": ("Store Operations", "Manager Bonus"),
                     "Store_Ops_Ex": ("Store Operations", "Total OpEx"),
+                    "Store_NOI_Pre": ("Store Operations", "NOI"), # New
                     "Ex_Util": ("Detailed Expenses", "Utilities"),
                     "Ex_Ins": ("Detailed Expenses", "Insurance"),
                     "Ex_Maint": ("Detailed Expenses", "Maintenance"),
@@ -195,7 +175,6 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                 df_display.columns = pd.MultiIndex.from_tuples(df_display.columns)
                 
                 # Apply format only to numeric columns
-                # Exclude Time-based columns explicitly in case they are detected as int/float
                 numeric_cols = df_display.select_dtypes(include=['float', 'int']).columns
                 exclude_cols = [c for c in numeric_cols if c[0] == "Time"] # MultiIndex check
                 numeric_cols = [c for c in numeric_cols if c not in exclude_cols]
@@ -209,17 +188,22 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
                 # Simple Column Order
                 cols = ["Year", "Store_Revenue", "Store_Net", "Prop_Net", "Owner_Cash_Flow", "Owner_Cum"]
                 if aggregation == "Monthly": cols.insert(1, "Month")
-                if aggregation == "Quarterly": cols.insert(2, "Quarter")
+                if aggregation == "Quarterly": cols.insert(1, "Quarter")
+                
+                # Filter cols
+                final_cols = [c for c in cols if c in df_view.columns]
                 
                 st.dataframe(
-                    df_view[cols].style.format("${:,.0f}"),
+                    df_view[final_cols].style.format("${:,.0f}"),
                     width="stretch"
                 )
 
         # Interactive Waterfall Section (Moved up for visibility)
         st.subheader("Profit Anatomy (Waterfall)")
         c_w_sel, _ = st.columns([1, 3])
-        water_year = c_w_sel.selectbox("Select Year for Waterfall", range(1, time_horizon + 1))
+        # Select Calendar Year not Project Year
+        available_years = sorted(df_view['Year'].unique())
+        water_year = c_w_sel.selectbox("Select Year for Waterfall", available_years)
         
         y_data = df_projection[df_projection['Year']==water_year].sum()
         
@@ -298,6 +282,65 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
         )
         st.plotly_chart(fig_owner, width="stretch", key="chart_owner_cf")
         
+        # --- METRIC EXPLORER ---
+        st.subheader("Interactive Metric Explorer")
+        st.caption("Select any financial metrics to visualize trends and event correlations.")
+        
+        # Get all valid numeric columns (excluding metadata)
+        all_numeric = [c for c in df_view.columns if c not in ['Year', 'Month', 'Quarter', 'Project_Year', 'Abs_Quarter', 'Display_Date']]
+        default_selections = ['Store_Revenue', 'Store_Net']
+        
+        selected_metrics = st.multiselect("Select Metrics", all_numeric, default=[c for c in default_selections if c in all_numeric])
+        
+        if selected_metrics:
+            fig_explore = go.Figure()
+            
+            for metric in selected_metrics:
+                fig_explore.add_trace(go.Scatter(
+                    x=x_axis, 
+                    y=df_view[metric], 
+                    mode='lines+markers', 
+                    name=metric
+                ))
+
+            # --- Event Overlay (Reused Logic) ---
+            if model_events:
+                 for e in model_events:
+                    if e.is_active:
+                        # Logic matched to Owner Chart above
+                        event_date = start_date + relativedelta(months=e.start_month - 1)
+                        e_year = event_date.year
+                        e_q = (event_date.month - 1) // 3 + 1
+                        
+                        x_loc = None
+                        if aggregation == "Monthly":
+                            label = event_date.strftime('%b %Y')
+                            if label in x_axis.values: x_loc = label
+                        elif aggregation == "Annual":
+                            if e_year in x_axis.values: x_loc = e_year
+                        elif aggregation == "Quarterly":
+                             label = f"Q{e_q} {e_year}"
+                             if label in x_axis.values: x_loc = label
+                        
+                        if x_loc:
+                            fig_explore.add_vline(x=x_loc, line_width=1, line_dash="dash", line_color="orange", opacity=0.5)
+                            # Only add annotation if it's the first trace to avoid clutter? Or just add it.
+                            # Standard plotly handles annotation overlap poorly, but vertical text is okay.
+                            fig_explore.add_annotation(
+                                x=x_loc, y=0, text=e.name, 
+                                showarrow=False, yref='paper', yanchor='bottom', 
+                                textangle=-90, font=dict(color="orange")
+                            )
+
+            fig_explore.update_layout(
+                title="Metric Trends & Event Impact",
+                hovermode="x unified",
+                yaxis_title="Amount ($)",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            st.plotly_chart(fig_explore, width="stretch", key="chart_explorer")
+
+
         # --- NEW VISUALIZATIONS ---
         
         # 1. Expense Breakdown (Stacked)
@@ -380,66 +423,49 @@ def render_dashboard(df_projection, model_events, ai_config, inputs_summary, sta
     st.markdown("---")
     st.subheader("Ask the CFO (AI Consultant)")
 
-    col_ai_1, col_ai_2 = st.columns([3, 1])
-
-    with col_ai_1:
-        user_question = st.text_input("Ask a question about your financial scenario:", placeholder="e.g. Should I increase Commercial Rent to shift profit to the Holding Co?")
-
-    with col_ai_2:
-        st.write("") # Spacer
-        st.write("") 
+    with st.expander("AI Financial Analyst", expanded=True):
+        # AI Config Section (Relocated)
+        c_ai_conf1, c_ai_conf2, c_ai_conf3 = st.columns([1, 2, 1])
         
-        # Build Context for AI
-        # Need year 1 summary from inputs?
-        # Re-calc year 1 summary from projection for accuracy
-        df_y1 = df_projection[df_projection['Year'] == 1]
-        summary_y1 = {
-             "Owner_Cash_Flow": df_y1['Owner_Cash_Flow'].sum(),
-             "Store_Net_Income": df_y1['Store_Net'].sum(),
-             "Property_Net_Income": df_y1['Prop_Net'].sum()
+        with c_ai_conf1:
+            ai_provider = st.selectbox("AI Provider", ["Google (Gemini)", "OpenAI", "Anthropic"], index=0, key="dash_ai_provider")
+        
+        with c_ai_conf2:
+             # Match keys to what logic likely expects or just handle locally
+            if ai_provider == "Google (Gemini)":
+                user_api_key = st.text_input("Gemini API Key", type="password", key="dash_google_key", help="Leave blank if using Env Var")
+                ai_model = "gemini-2.0-flash-exp"
+            elif ai_provider == "OpenAI":
+                user_api_key = st.text_input("OpenAI API Key", type="password", key="dash_openai_key")
+                ai_model = "gpt-4o"
+            else:
+                user_api_key = st.text_input("Anthropic API Key", type="password", key="dash_anthropic_key")
+                ai_model = "claude-3-5-sonnet-20240620"
+        
+        with c_ai_conf3:
+             # Simplified model selection or keep robust? Let's keep it simple for dashboard space
+             st.caption(f"Model: {ai_model}")
+             
+        ai_config = {
+            "provider": ai_provider,
+            "api_key": user_api_key,
+            "model_id": ai_model
         }
-        
-        current_context = {
-            "year_1_summary": summary_y1,
-            "assumptions": inputs_summary,
-            "events": len(model_events)
-        }
-        
-        analysis_prompt = f"""
-        Analyze this 10-year projection for a general store:
-        - Annual Owner Cash Flow (avg): ${total_cf/time_horizon:,.0f}
-        - Total 10y Cash Flow: ${total_cf:,.0f}
-        
-        Provide 3 strategic recommendations.
-        """
-        if st.button("Generate AI Executive Summary"):
-            with st.spinner("Analyzing financials..."):
-                summary_10y = df_projection.groupby('Year')[['Owner_Cash_Flow', 'Store_Net', 'Prop_Net']].sum().to_dict()
-                full_context = {
-                    "Input_Parameters": current_context,
-                    "10_Year_Summary": summary_10y,
-                    "Events": [e.__dict__ for e in model_events],
-                    "Full_Data_CSV": df_projection.to_csv(index=False)
-                }
-                summary = ask_ai(analysis_prompt, full_context, provider=ai_config['provider'], api_key=ai_config['api_key'], model_id=ai_config['model_id'])
-                st.info(summary)
 
-    if user_question:
-        with st.spinner(f"Consulting {ai_config['provider']}..."):
-            
-            # Recalc context again? Or just use what we built.
-            df_y1 = df_projection[df_projection['Year'] == 1]
-            summary_y1 = {
-                 "Owner_Cash_Flow": df_y1['Owner_Cash_Flow'].sum(),
-                 "Store_Net_Income": df_y1['Store_Net'].sum(),
-                 "Property_Net_Income": df_y1['Prop_Net'].sum()
-            }
-            context_data = {
-                "year_1_summary": summary_y1,
-                "assumptions": inputs_summary,
-                "events_count": len(model_events),
-                "Full_Data_CSV": df_projection.to_csv(index=False)
-            }
-            
-            response = ask_ai(user_question, context_data, provider=ai_config['provider'], api_key=ai_config['api_key'], model_id=ai_config['model_id'])
-            st.info(response)
+        user_q = st.text_area("Ask a question about your scenario:", height=70)
+        
+        if st.button("Analyze Scenario"):
+            if not user_q:
+                st.warning("Please type a question.")
+            else:
+                with st.spinner("Analyzing financial data..."):
+                    # Prepare Context
+                    context = {
+                        "summary": inputs_summary,
+                        "data_head": df_projection.head(12).to_dict(), # First year monthly
+                        "totals": df_projection[['Store_Revenue', 'Store_Net', 'Prop_Net', 'Owner_Cash_Flow']].sum().to_dict(),
+                        "events": [e.__dict__ for e in model_events if e.is_active]
+                    }
+                    
+                    response = ask_ai(ai_config, context, user_q)
+                    st.info(response)

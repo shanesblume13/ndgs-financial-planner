@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict
 import pandas as pd
 import numpy as np
+from datetime import date
+from dateutil.relativedelta import relativedelta
 
 # --- Constants ---
 # Updated Base Revenue to align with $425k/yr legacy pro forma
@@ -16,7 +18,8 @@ class BusinessEvent:
     end_month: int = 120
     frequency: str = "One-time" # "One-time", "Monthly", "Quarterly", "Annually"
     impact_target: str = "Revenue" # "Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex"
-    value_type: str = "Fixed Amount ($)" # "Fixed Amount ($)", "% of Revenue", "% of Cost", "% of Net (NOI) - Prev Quarter"
+    pct_basis: str = "Revenue" # "Revenue", "COGS", "Labor", "Ops (Fixed)", "Rent", "Capex", "NOI"
+    value_type: str = "Fixed Amount ($)" # "Fixed Amount ($)", "Percentage (%)"
     value: float = 0.0
     affected_entity: str = "Store" # "Store", "Property", "Both"
     description: str = ""
@@ -60,15 +63,16 @@ class FinancialModel:
     loan_amount: float
     interest_rate: float
     amortization_years: int
+    initial_capex: float # New field
     commercial_rent_income: float
     residential_rent_income: float
     
-
+    
     
     # Dynamic Events
     events: List[BusinessEvent] = field(default_factory=list)
 
-    def calculate_projection(self, months=120) -> pd.DataFrame:
+    def calculate_projection(self, start_date: date, months=120) -> pd.DataFrame:
         """
         Generates a 120-month (10-year) projection dataframe.
         """
@@ -80,26 +84,32 @@ class FinancialModel:
         )
         
         # Initial Capex
-        initial_capex = 0.0
+        initial_capex_cost = self.initial_capex
 
-        cumulative_cash_owner = -initial_capex
-        cumulative_cash_store = -initial_capex 
+        cumulative_cash_owner = -initial_capex_cost
+        cumulative_cash_store = -initial_capex_cost
         cumulative_cash_prop = 0.0
         
 
-
         for m in range(1, months + 1):
-            year_idx = (m - 1) // 12
-            month_in_year = (m - 1) % 12
-            quarter_idx = month_in_year // 3
+            # Calendar Calculations
+            current_date = start_date + relativedelta(months=m-1)
+            cal_year = current_date.year
+            cal_month = current_date.month
+            cal_quarter_idx = (cal_month - 1) // 3 # 0-3 index
+            
+            # Growth Factors (Compounded Annually based on PROJECT year index)
+            # We keep growth tied to project longevity (Year 1 vs Year 2 of ownership), not calendar year.
+            project_year_idx = (m - 1) // 12
             
             # --- Growth Factors ---
-            rev_growth_factor = (1 + self.revenue_growth_rate / 100.0) ** year_idx
-            exp_growth_factor = (1 + self.expense_growth_rate / 100.0) ** year_idx
-            wage_growth_factor = (1 + self.wage_growth_rate / 100.0) ** year_idx
-            rent_growth_factor = (1 + self.rent_escalation_rate / 100.0) ** year_idx
+            rev_growth_factor = (1 + self.revenue_growth_rate / 100.0) ** project_year_idx
+            exp_growth_factor = (1 + self.expense_growth_rate / 100.0) ** project_year_idx
+            wage_growth_factor = (1 + self.wage_growth_rate / 100.0) ** project_year_idx
+            rent_growth_factor = (1 + self.rent_escalation_rate / 100.0) ** project_year_idx
             
-            seasonality_factor = self.seasonality[quarter_idx]
+            # Use Calendar Seasonality
+            seasonality_factor = self.seasonality[cal_quarter_idx]
 
             # --- STORE OPERATION ---
             # 1. Revenue
@@ -137,8 +147,15 @@ class FinancialModel:
             event_capex_store = 0.0
             event_capex_prop = 0.0
             event_prop_ops_impact = 0.0
+            
+            # Track individual event impacts for the dataframe
+            monthly_event_breakdown = {}
 
             for e in self.events:
+                # Initialize column with 0 for every event to ensure consistent schema
+                if f"Event: {e.name}" not in monthly_event_breakdown:
+                     monthly_event_breakdown[f"Event: {e.name}"] = 0.0
+
                 # 0. Active Check
                 if not e.is_active:
                     continue
@@ -163,32 +180,54 @@ class FinancialModel:
 
                 # 3. Calculate Value
                 val = 0.0
+                model_base_val = 0.0
+                
                 if e.value_type == "Fixed Amount ($)":
                     val = e.value
-                elif e.value_type == "% of Revenue":
-                    val = monthly_base_rev * (e.value / 100.0)
-                elif e.value_type == "% of COGS":
-                    val = cogs_base_amt * (e.value / 100.0)
-                elif e.value_type == "% of Ops":
-                     val = store_ops_expenses * (e.value / 100.0)
-                elif e.value_type == "% of Previous Quarter NOI":
-                    # Sum NOI from previous 3 months (m-1, m-2, m-3)
-                    # Indices in projection list: m-2, m-3, m-4
-                    # Only valid if m > 3
-                    if m > 3:
-                        prev_q_noi = 0.0
-                        for i in range(1, 4):
-                             # Check existence
-                             if (m - i - 1) >= 0:
-                                 prev_data = projection[m - i - 1]
-                                 prev_q_noi += prev_data.get("Store_NOI_Pre", 0.0)
-                        
-                        # Only apply bonus if NOI is positive? Yes, standard practice.
-                        if prev_q_noi > 0:
-                             val = prev_q_noi * (e.value / 100.0)
+                elif "Percent" in e.value_type or "%" in e.value_type: # Handle "Percentage (%)" or legacy strings
+                    # Detemine Basis
+                    # Check explicit basis first
+                    basis_to_use = e.pct_basis
+                    
+                    # Fallback for legacy "Value Type" strings that were like "% of Revenue"
+                    if "Revenue" in e.value_type: basis_to_use = "Revenue"
+                    elif "COGS" in e.value_type: basis_to_use = "COGS"
+                    elif "Ops" in e.value_type: basis_to_use = "Ops (Fixed)"
+                    elif "NOI" in e.value_type: basis_to_use = "NOI"
+                    elif "Previous Quarter" in e.value_type: basis_to_use = "NOI"
+
+                    if basis_to_use == "Revenue":
+                        model_base_val = monthly_base_rev
+                    elif basis_to_use == "COGS":
+                        model_base_val = cogs_base_amt
+                    elif basis_to_use == "Labor":
+                        model_base_val = store_labor
+                    elif basis_to_use == "Ops (Fixed)":
+                        model_base_val = store_ops_expenses
+                    elif basis_to_use == "Rent":
+                        model_base_val = store_rent_expense
+                    elif basis_to_use == "Capex":
+                        model_base_val = 0.0 
+                    elif basis_to_use == "NOI":
+                         # Determine lookback window based on frequency
+                         window = 1
+                         if e.frequency == "Quarterly": window = 3
+                         elif e.frequency == "Annually": window = 12
+                         
+                         if m > window:
+                            noi_sum = 0.0
+                            for i in range(1, window + 1):
+                                 if (m - i - 1) >= 0:
+                                     prev_data = projection[m - i - 1]
+                                     noi_sum += prev_data.get("Store_NOI_Pre", 0.0)
+                            model_base_val = noi_sum if noi_sum > 0 else 0.0
+
+                    val = model_base_val * (e.value / 100.0)
                 
+                # Store breakdown
+                monthly_event_breakdown[f"Event: {e.name}"] += val
+
                 # 4. Apply to Target
-                # Note: We iterate all events. Order doesn't matter as we base % on Base amounts (safe).
                 if e.impact_target == "Revenue":
                     event_rev_impact += val
                 elif e.impact_target == "COGS":
@@ -258,40 +297,43 @@ class FinancialModel:
             total_event_capex = event_capex_store + event_capex_prop
             net_event_impact = event_rev_impact - total_event_expense_impact - total_event_capex
 
-            projection.append({
-                "Month": m,
-                "Year": year_idx + 1, # Reverted to original as current_year was not defined
-                "Quarter": quarter_idx + 1, # Reverted to original as current_quarter was not defined
+            row_data = {
+                "Year": cal_year,
+                "Month": cal_month,
+                "Quarter": cal_quarter_idx + 1,
+                "Project_Month": m,
+                "Project_Year": project_year_idx + 1,
                 
                 "Store_Revenue": store_total_revenue,
-                "Store_COGS": store_cogs,
-                "Store_Labor": store_labor,
-                "Store_Ops_Ex": store_ops_expenses,
-                "Store_Rent_Ex": store_rent_expense,
+                "Store_COGS": -store_cogs,
+                "Store_Labor": -store_labor,
+                "Store_Bonus": -bonus_payout,
+                "Store_Ops_Ex": -store_ops_expenses,
+                "Ex_Util": -ex_util,
+                "Ex_Ins": -ex_ins,
+                "Ex_Maint": -ex_maint,
+                "Ex_Mktg": -ex_mktg,
+                "Ex_Prof": -ex_prof,
+                "Store_Rent_Ex": -store_rent_expense,
                 
-                # Detailed Expenses (Approximate breakdown if needed or just total)
-                "Ex_Util": ex_util, # Reverted to original variable names
-                "Ex_Ins": ex_ins, # Reverted to original variable names
-                "Ex_Maint": ex_maint, # Reverted to original variable names
-                "Ex_Mktg": ex_mktg, # Reverted to original variable names
-                "Ex_Prof": ex_prof, # Reverted to original variable names
+                "Prop_Debt": -prop_debt,
                 
-                "Store_Bonus": bonus_payout,
-                "Capex": event_capex_store + event_capex_prop,
-                
-                "Store_NOI_Pre": store_noi_pre_bonus, # Stored for lookback
                 "Store_Net": store_net_cash,
-                
-                "Prop_Debt": prop_debt,
                 "Prop_Net": prop_net_cash,
                 
+                "Store_Cum": cumulative_cash_store,
+                "Prop_Cum": cumulative_cash_prop,
+                "Owner_Cum": cumulative_cash_owner,
                 "Owner_Cash_Flow": consolidated_cash,
-                "Store_Cum": cumulative_cash_store, # Reverted to original
-                "Prop_Cum": cumulative_cash_prop, # Reverted to original
-                "Owner_Cum": cumulative_cash_owner, # Reverted to original
                 
-                "Net_Event_Impact": net_event_impact
-            })
+                "Capex": -(initial_capex_cost if m == 1 else total_event_capex),
+                "Net_Event_Impact": net_event_impact,
+                "Store_NOI_Pre": store_noi_pre_bonus
+            }
+            
+            # Merge event columns
+            row_data.update(monthly_event_breakdown)
+            
+            projection.append(row_data)
             
         return pd.DataFrame(projection)
-

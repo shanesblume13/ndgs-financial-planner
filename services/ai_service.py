@@ -7,7 +7,7 @@ def ask_ai(prompt, context, provider="Google (Gemini)", api_key=None, model_id="
     """
     Queries the selected AI Provider for financial advice.
     """
-    full_prompt = f"Context: {context}\n\nUser Question: {prompt}\n\nPlease provide a concise, financial-expert response."
+    full_prompt = f"Context: {context}\n\nUser Question: {prompt}\n\nPlease provide a concise, financial-expert response.\nIMPORTANT: If the user asks for calculating metrics, LOOK at the 'Full_Data_CSV' key in the Context before saying you don't have data."
     
     try:
         # --- Google Gemini ---

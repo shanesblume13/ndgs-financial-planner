@@ -6,27 +6,27 @@ import views.sidebar as sidebar
 import views.dashboard as dashboard
 
 # --- Page Configuration ---
-st.set_page_config(page_title="North Dorr General Store - Financial Scenarios", layout="wide")
+st.set_page_config(page_title="NDGS - Mixed Use Financial Planner", layout="wide")
 
 # --- Styles ---
 styles.apply_custom_css()
 
 # --- Header ---
-st.title("North Dorr General Store: Financial Scenario Generator (V2.1)")
+st.title("NDGS - Mixed Use Financial Planner")
 st.markdown("Dynamic acquisition modeling with Seasonality, Growth, and Event Planning.")
 
 # --- Controller Logic ---
 
 # 1. Get Inputs (View)
 # render_sidebar returns (config_dict, ai_config_dict)
-config, ai_config = sidebar.render_sidebar() 
+config = sidebar.render_sidebar() 
 
 # 2. Run Model (Logic)
 # Unpack config directly into Model
 # Extract start_date first as it's not a model field
 start_date = config.pop('start_date', None) 
 model = FinancialModel(**config)
-df_projection = model.calculate_projection(months=120)
+df_projection = model.calculate_projection(start_date=start_date, months=120)
 
 # 3. Render Output (View)
 # Pass results, metadata, and AI config to Dashboard
@@ -40,7 +40,6 @@ inputs_summary = {
 dashboard.render_dashboard(
     df_projection=df_projection, 
     model_events=model.events, 
-    ai_config=ai_config, 
     inputs_summary=inputs_summary,
     start_date=start_date
 )
