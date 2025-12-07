@@ -293,8 +293,72 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
 
     # 3. Pro Forma Financial Statements (Table First)
     st.subheader("Pro Forma Financial Statements")
-    df_pro_forma = _generate_pro_forma(df_display, x_axis)
-    st.dataframe(df_pro_forma, use_container_width=True)
+    df_pro_forma_raw = _generate_pro_forma(df_display, x_axis)
+    
+    # --- STYLING ---
+    # Rows to Bold
+    bold_rows = ['Total Revenue', 'Gross Profit', 'Net Operating Income (NOI)', 'Net Cash Flow']
+    
+    # Helper to apply styles
+    def style_pro_forma(row):
+        styles = []
+        # Bold Logic
+        if row.name in bold_rows:
+            styles.append('font-weight: bold')
+        return styles
+
+    # Helper for formatting values
+    def format_values(val):
+        if pd.isna(val): return ""
+        if isinstance(val, str): return val
+        return f"${val:,.0f}"
+
+    # Create Styler
+    styler = df_pro_forma_raw.style.apply(lambda x: [f"font-weight: bold" if x.name in bold_rows else "" for _ in x], axis=1)
+    
+    # Format Numbers
+    # Everything is currency except DSCR
+    format_dict = {col: "${:,.0f}" for col in df_pro_forma_raw.columns}
+    
+    # Apply special formatting for DSCR row if it exists
+    # Note: Styler.format works on columns, but we have metrics as Index. 
+    # We can use a custom formatter function that checks the index for the row being rendered? 
+    # Actually, pandas styler format is cell-based or column-based. 
+    # To format specific rows differently, we might need a formatter that inspects the index, but standard format() doesn't give index context easily.
+    # ALTERNATIVE: Format the data frame as strings BEFORE passing to Styler, but keep the index for style application.
+    
+    # Let's do the formatting in the dataframe construction but keep numeric where possible for underlying data if needed?
+    # No, for display we want precise control. 
+    # Let's use the _generate_pro_forma to return a DF where DSCR is float and others are float.
+    # Then we use `styler.format` passing a formatter function.
+    
+    def custom_formatter(x):
+        # This function doesn't know which row x belongs to if applied elementwise without context.
+        return f"${x:,.0f}"
+
+    # We will iterate and build a formatter dict for specific cells? Too complex.
+    # Simpler: We can just use the Styler.format(formatter=...)
+    # But wait, Styler.format applies to columns.
+    
+    # Let's try this: convert the DataFrame to strictly formatted strings in a new DF for display,
+    # but use the index of the original/new DF to drive the bolding.
+    
+    df_display_final = df_pro_forma_raw.copy()
+    
+    # Format all as currency first
+    for col in df_display_final.columns:
+        df_display_final[col] = df_display_final[col].apply(lambda x: f"${x:,.0f}" if isinstance(x, (int, float)) else x)
+    
+    # Fix DSCR row
+    if 'DSCR' in df_display_final.index:
+        # We need to access the raw values again to format correctly
+        dscr_vals = df_pro_forma_raw.loc['DSCR']
+        df_display_final.loc['DSCR'] = dscr_vals.apply(lambda x: f"{x:.2f}x")
+
+    # Apply Style to the STRING dataframe
+    styler_final = df_display_final.style.apply(lambda x: [f"font-weight: bold" if x.name in bold_rows else "" for _ in x], axis=1)
+    
+    st.dataframe(styler_final, use_container_width=True)
 
     # 4. Visualizations
     st.subheader("Financial Visualizations")
@@ -547,151 +611,121 @@ def _generate_pro_forma(df_agg, periods):
     Rows: Metrics
     Cols: Periods
     """
-    # Initialize dictionary for rows
+    # Reorder keys to match image
     data = {}
     
-    # 1. Income
-    # Store Revenue + Rental Income (Rental income is inside Prop_Net usually, but we need gross)
-    # The model outputs 'Prop_Net' which is Rent - Tax - Debt. 
-    # To get Gross Rent, we might need to back it out or check if we aggregated it.
-    # checking agg_dict... we didn't agg 'Gross_Rent' explicitly.
-    # However, 'Prop_Net' = Gross_Rent - Tax - Debt.
-    # So Gross_Rent = Prop_Net + Tax + Debt.
-    
-    # Note: df_agg values are sums (negative for expenses).
-    # Prop_Debt and Prop_Tax are negative numbers in the model output.
-    # So: Prop_Net = Gross_Rent + (Prop_Tax) + (Prop_Debt).
-    # Gross_Rent = Prop_Net - Prop_Tax - Prop_Debt.
-    
-    revenue_store = df_agg['Store_Revenue']
+    # 1. Revenue
+    data['Revenue (Operations)'] = df_agg['Store_Revenue']
+    revenue_rent = df_agg.get('Prop_Revenue', 0.0) # Using Prop_Revenue which is already calculated as Sum in agg_dict ??
+    # Wait, in agg_dict: 'Prop_Revenue': 'sum' is NOT there. Only Prop_Net.
+    # Let's fix calculation.
+    # Original code: revenue_rent = prop_net - prop_tax - prop_debt. 
+    # NOTE: In agg_dict lines 268+, 'Prop_Revenue' is NOT present.
+    # But in lines 22-23 'Prop_Revenue' is mapped.
+    # In Tab 5 (Real Estate), we do aggregate Prop_Revenue if distinct.
+    # Let's re-derive or add 'Prop_Revenue' to agg_dict in future.
+    # For now, stick to the derivation used in original function for safety.
     prop_net = df_agg['Prop_Net']
     prop_tax = df_agg['Prop_Tax']
     prop_debt = df_agg['Prop_Debt']
-    
     revenue_rent = prop_net - prop_tax - prop_debt
     
-    total_rev = revenue_store + revenue_rent
-    
-    data['Revenue (Operations)'] = revenue_store
     data['Revenue (Real Estate)'] = revenue_rent
-    data['Total Revenue'] = total_rev
+    data['Total Revenue'] = data['Revenue (Operations)'] + data['Revenue (Real Estate)']
     
     # 2. COGS
-    # Store_COGS is negative
-    cogs = df_agg['Store_COGS']
-    data['COGS'] = cogs
+    data['COGS'] = df_agg['Store_COGS']
     
     # 3. Gross Profit
-    # Rev + COGS (since COGS is neg)
-    gross_profit = total_rev + cogs
-    data['Gross Profit'] = gross_profit
+    data['Gross Profit'] = data['Total Revenue'] + data['COGS'] # COGS is neg
     
-    # 4. Operating Expenses
-    # Store Labor + Store Ops + Store Rent + Prop Tax
-    labor = df_agg['Store_Labor']
-    ops = df_agg['Store_Ops_Ex']
-    rent_ex = df_agg['Store_Rent_Ex']
-    # Prop Tax
-    
-    total_opex = labor + ops + rent_ex + prop_tax
-    
-    data['Labor'] = labor
-    data['OpEx (Store)'] = ops
-    data['Rent (Commercial)'] = rent_ex
+    # 4. Expenses
+    data['Labor'] = df_agg['Store_Labor']
+    data['OpEx (Store)'] = df_agg['Store_Ops_Ex']
+    data['Rent (Commercial)'] = df_agg['Store_Rent_Ex']
     data['Property Tax'] = prop_tax
-    data['Total OpEx'] = total_opex
     
-    # 5. NOI / EBITDA
-    noi = gross_profit + total_opex # (opex is neg)
-    data['Net Operating Income (NOI)'] = noi
+    # NOI
+    # NOI = Gross Profit + Labor + OpEx + Rent + PropTax (all expenses are negative)
+    data['Net Operating Income (NOI)'] = data['Gross Profit'] + data['Labor'] + data['OpEx (Store)'] + data['Rent (Commercial)'] + data['Property Tax']
     
-    # 6. Debt Service
+    # Debt
     data['Debt Service (P&I)'] = prop_debt
     
-    # 8. Capital Expenditures (Capex)
+    # Capex (Renamed)
     capex = df_agg.get('Capex', 0.0)
-    data['Capital Expenditures'] = capex
-
-    # 9. Net Cash Flow
-    # NOI + Debt + Capex (Capex is negative)
-    ncf = noi + prop_debt + capex
-    data['Net Cash Flow'] = ncf
+    data['Capital Expenditures (Normalized)'] = capex
     
-    # 10. DSCR (Debt Service Coverage Ratio)
+    # Net Cash Flow
+    # NOI + Debt + Capex
+    data['Net Cash Flow'] = data['Net Operating Income (NOI)'] + data['Debt Service (P&I)'] + data['Capital Expenditures (Normalized)']
+    
+    # 5. Balance Sheet (Cash)
+    if 'Cash_Balance' in df_agg.columns:
+        data['Cash on Hand (End of Period)'] = df_agg['Cash_Balance']
+        
+    # 6. DSCR
     # NOI / Abs(Debt Service)
-    # Avoid division by zero
     def calc_dscr(n, d):
         if d == 0: return 0.0
         return n / abs(d)
-        
-    dscr_series = pd.Series([calc_dscr(n, d) for n, d in zip(noi, prop_debt)])
+    
+    dscr_series = pd.Series([calc_dscr(n, d) for n, d in zip(data['Net Operating Income (NOI)'], data['Debt Service (P&I)'])])
     data['DSCR'] = dscr_series
 
-    # 11. Balance Sheet Items (End of Period)
-    if 'Cash_Balance' in df_agg.columns:
-        data['Cash on Hand (End of Period)'] = df_agg['Cash_Balance']
+    # Assemble DataFrame with strict order
+    ordered_keys = [
+        'Revenue (Operations)', 'Revenue (Real Estate)', 'Total Revenue',
+        'COGS', 'Gross Profit',
+        'Labor', 'OpEx (Store)', 'Rent (Commercial)', 'Property Tax',
+        'Net Operating Income (NOI)',
+        'Debt Service (P&I)', 'Capital Expenditures (Normalized)',
+        'Net Cash Flow',
+        'Cash on Hand (End of Period)',
+        'DSCR'
+    ]
     
-    # Construct DF
-    df = pd.DataFrame(data)
+    # Filter data dict to ordered keys ensuring all exist
+    final_data = {k: data.get(k, pd.Series(0, index=df_agg.index)) for k in ordered_keys}
     
-    # Transpose: Rows = Metrics, Cols = Periods
+    df = pd.DataFrame(final_data)
+    
+    # Transpose
     df_t = df.T
     df_t.columns = periods
     
-    # Add Total Column if Monthly view
-    # (We check if 'periods' looks like months, simplistic check: if length > 4 or just do it for all if meaningful)
-    # Actually, simpler: sum the numeric source data 'df' before transposing.
-    # But wait, balance sheet items (Cash Balance) should be LAST, not SUM.
+    # Add TOTALS Column
+    # Sum List
+    sum_rows = [
+        'Revenue (Operations)', 'Revenue (Real Estate)', 'Total Revenue',
+        'COGS', 'Gross Profit',
+        'Labor', 'OpEx (Store)', 'Rent (Commercial)', 'Property Tax',
+        'Net Operating Income (NOI)',
+        'Debt Service (P&I)', 'Capital Expenditures (Normalized)',
+        'Net Cash Flow'
+    ]
     
-    # List of Flow items to SUM
-    sum_cols = ['Revenue (Operations)', 'Revenue (Real Estate)', 'Total Revenue', 
-                'COGS', 'Gross Profit', 
-                'Labor', 'OpEx (Store)', 'Rent (Commercial)', 'Property Tax', 'Total OpEx',
-                'Net Operating Income (NOI)', 'Debt Service (P&I)', 'Capital Expenditures', 'Net Cash Flow']
+    last_rows = ['Cash on Hand (End of Period)']
     
-    # List of Stock items to LAST (or average, but usually last for balance)
-    last_cols = ['Cash on Hand (End of Period)']
+    total_series = pd.Series(index=df_t.index)
     
-    # Create Total series
-    total_series = pd.Series(index=df.columns)
-    
-    for c in df.columns:
-        if c in sum_cols:
-            total_series[c] = df[c].sum()
-        elif c in last_cols:
-             # Last value
-             total_series[c] = df[c].iloc[-1]
-        elif c == 'DSCR':
-             # Recalculate DSCR based on Totals
-             t_noi = df['Net Operating Income (NOI)'].sum()
-             t_debt = df['Debt Service (P&I)'].sum()
-             total_series[c] = calc_dscr(t_noi, t_debt)
+    for row_name in df_t.index:
+        if row_name in sum_rows:
+            total_series[row_name] = df_t.loc[row_name].sum()
+        elif row_name in last_rows:
+            # Last period value
+            total_series[row_name] = df_t.loc[row_name].iloc[-1]
+        elif row_name == 'DSCR':
+            # Recalc DSCR on totals
+            t_noi = total_series['Net Operating Income (NOI)']
+            t_debt = total_series['Debt Service (P&I)']
+            total_series[row_name] = calc_dscr(t_noi, t_debt)
         else:
-            total_series[c] = 0.0 # Default
-    
-    # Add Total to df_t (which is Transposed, so we add a new Column)
-    df_t['TOTAL'] = total_series
-    
-    # Formatting helper
-    def fmt(x):
-        try:
-             # DSCR Formatting
-             if isinstance(x, float) and x < 100 and x > -100 and x != 0: # Heuristic for ratio
-                  # Check if it's the DSCR row? Logic is hard inside map without index access.
-                  pass
-             
-             return f"${x:,.0f}"
-        except:
-            return x
+            total_series[row_name] = 0.0
             
-    # Apply standard formatting then custom overriding for DSCR
-    df_formatted = df_t.applymap(fmt)
-    
-    # Override DSCR formatting
-    if 'DSCR' in df_formatted.index:
-         df_formatted.loc['DSCR'] = df_t.loc['DSCR'].apply(lambda x: f"{x:.2f}x")
+    df_t['TOTAL'] = total_series
 
-    return df_formatted
+    return df_t
 
 
 
