@@ -243,14 +243,14 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 1. Global Controls
     c_proj1, c_proj2 = st.columns(2)
     with c_proj1:
-        time_horizon = st.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years", key="time_horizon_select")
+        time_horizon = st.selectbox("Time Horizon", [1, 3, 5, 10], index=0, format_func=lambda x: f"{x} Years", key="time_horizon_select")
     
     with c_proj2:
-        if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Annual"
+        if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Monthly"
         b1, b2, b3 = st.columns(3)
-        if b1.button("Annual", use_container_width=True): st.session_state['view_agg'] = "Annual"
+        if b1.button("Monthly", use_container_width=True): st.session_state['view_agg'] = "Monthly"
         if b2.button("Quarterly", use_container_width=True): st.session_state['view_agg'] = "Quarterly"
-        if b3.button("Monthly", use_container_width=True): st.session_state['view_agg'] = "Monthly"
+        if b3.button("Annual", use_container_width=True): st.session_state['view_agg'] = "Annual"
         aggregation = st.session_state['view_agg']
 
     # 2. Data Preparation
@@ -259,6 +259,9 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # Calculate EBITDA (Before aggregation)
     df_view['EBITDA'] = df_view['Store_Revenue'] + df_view['Store_COGS'] + df_view['Store_Labor'] + df_view['Store_Ops_Ex']
 
+    # Dynamically find Event columns for aggregation
+    event_cols = [c for c in df_view.columns if c.startswith("Event: ")]
+    
     # Aggregation Logic
     agg_dict = {
         'Store_Revenue': 'sum', 'Store_COGS': 'sum', 'Store_Labor': 'sum', 'Store_Ops_Ex': 'sum', 'Store_Net': 'sum',
@@ -266,8 +269,13 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         'Prop_Debt': 'sum', 'Prop_Tax': 'sum',
         'Cash_Balance': 'last', 'Cum_Capex': 'last',
         'Property_Value': 'last', 'Property_Equity': 'last', 'Intangible_Assets': 'last',
-        'Loan_Balance': 'last'
+        'Loan_Balance': 'last',
+        'Net_Event_Impact': 'sum' # Add Net Event Impact
     }
+    
+    # Add dynamic event columns to aggregation
+    for ec in event_cols:
+        agg_dict[ec] = 'sum'
     
     if aggregation == "Quarterly":
         df_display = df_view.groupby(['Year', 'Quarter']).agg(agg_dict).reset_index()
@@ -430,7 +438,46 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     fig_ebitda.update_layout(title=f"EBITDA vs {COLUMN_DISPLAY_MAP['Store_Net']}", hovermode="x unified", legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_ebitda, width="stretch", key="glob_chart_ebitda")
 
-    # Chart 4: Income & Expense Breakdown
+    # Chart 4: Event Impact Analysis (NEW)
+    # Only show if there are active events
+    active_event_cols = [c for c in df_display.columns if c.startswith("Event: ") and df_display[c].abs().sum() > 0]
+    
+    if active_event_cols:
+         st.subheader("Event Impact Analysis")
+         fig_events = go.Figure()
+         
+         # 1. Total Net Impact Line
+         fig_events.add_trace(go.Scatter(
+             x=x_axis, y=df_display['Net_Event_Impact'],
+             name='Net Event Impact', mode='lines+markers',
+             line=dict(color='red', width=3, dash='dot'),
+             hovertemplate='$%{y:,.2f}<extra></extra>'
+         ))
+         
+         # 2. Individual Event Breakdown (Bars)
+         # Using a distinct color palette for events
+         colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98FB98', '#DDA0DD', '#F0E68C']
+         
+         for i, col in enumerate(active_event_cols):
+             evt_name = col.replace("Event: ", "")
+             color = colors[i % len(colors)]
+             fig_events.add_trace(go.Bar(
+                 x=x_axis, y=df_display[col],
+                 name=evt_name,
+                 marker_color=color,
+                 hovertemplate= f"{evt_name}: $:%" + "{y:,.2f}<extra></extra>"
+             ))
+             
+         fig_events.update_layout(
+             title="Financial Impact of Business Events",
+             barmode='relative',
+             hovermode="x unified",
+             legend=dict(orientation="h", y=1.1)
+         )
+         st.plotly_chart(fig_events, width="stretch", key="glob_chart_events_breakdown")
+
+
+    # Chart 5: Income & Expense Breakdown
     fig_combo = go.Figure()
     
     # Revenue (Positive)
@@ -562,6 +609,14 @@ def _generate_pro_forma(df_agg, periods):
     # Let's show Net Cash Flow (Pre-Tax)
     ncf = noi + prop_debt
     data['Net Cash Flow'] = ncf
+    
+    # 8. Event Impact (Memo)
+    if 'Net_Event_Impact' in df_agg.columns:
+         data['Memo: Net Event Impact'] = df_agg['Net_Event_Impact']
+
+    # 9. Balance Sheet Items (End of Period)
+    if 'Cash_Balance' in df_agg.columns:
+        data['Cash on Hand (End of Period)'] = df_agg['Cash_Balance']
     
     # Construct DF
     df = pd.DataFrame(data)

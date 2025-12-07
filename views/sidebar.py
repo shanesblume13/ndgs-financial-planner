@@ -73,7 +73,29 @@ def initialize_session_state():
     if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date.today()
     
     # Dashboard View State
-    if 'time_horizon_select' not in st.session_state: st.session_state['time_horizon_select'] = 10
+    if 'time_horizon_select' not in st.session_state: st.session_state['time_horizon_select'] = 1 # Default 1 Year (Index 0 is 1 Year in UI list [1, 3, 5, 10], wait. in dashboard.py list is [1, 3, 5, 10]. ui returns value? No, selectbox with list returns value. So 1.)
+    if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Monthly"
+
+    # --- Auto-Load Default Preset (Once) ---
+    if '_preset_loaded' not in st.session_state:
+        # Enforce View Defaults on fresh load
+        st.session_state['time_horizon_select'] = 1
+        st.session_state['view_agg'] = "Monthly"
+        
+        default_preset_path = "assets/presets/ndgs-plan-20251207.csv"
+        if os.path.exists(default_preset_path):
+            try:
+                with open(default_preset_path, "r") as f:
+                    csv_content = f.read()
+                _parse_and_apply_settings(csv_content)
+                # Re-enforce strictly after load (incase preset has overrides, though preset doesn't usually store view state, only model inputs)
+                st.session_state['_preset_loaded'] = True
+                # Optional: st.toast("Default Plan Loaded", icon="📅") 
+            except Exception as e:
+                print(f"Failed to load default preset: {e}")
+                st.session_state['_preset_loaded'] = True # Prevent retry loop
+        else:
+             st.session_state['_preset_loaded'] = True # Mark done if file missing
 
 def render_sidebar():
     initialize_session_state()
