@@ -7,8 +7,6 @@ from dateutil.relativedelta import relativedelta
 
 # --- Constants ---
 # Updated Base Revenue to align with $425k/yr legacy pro forma
-# Updated Base Revenue to align with $425k/yr legacy pro forma
-BASE_REVENUE_MONTHLY = 425000.0 / 12.0
 DAYS_IN_MONTH = 30.5
 
 @dataclass
@@ -171,8 +169,8 @@ class FinancialModel:
             staff_cost_mo = current_hourly_wage * required_hourly_staff_hours
             
             # Apply Seasonality to Hourly Staff only (Managers are usually fixed/stable presence)
-            labor_seasonality = 1 + (seasonality_factor - 1) * 0.5
-            store_labor = manager_mo_cost + (staff_cost_mo * labor_seasonality)
+            # REF: Removed seasonality from labor as per user request
+            store_labor = manager_mo_cost + staff_cost_mo
 
             # 4. Store Ops Expenses (Detailed)
             ex_util = self.utilities * exp_growth_factor

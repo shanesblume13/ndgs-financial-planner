@@ -51,6 +51,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         st.caption("Operating Expenses & Fixed Costs")
         c1, c2 = st.columns(2)
         with c1:
+            st.number_input("Base Annual Revenue ($)", min_value=100000.0, step=10000.0, key='base_annual_revenue', help="Starting baseline before growth & seasonality")
             st.slider("Daily Operating Hours", 6, 24, key='operating_hours')
             st.number_input("Utilities ($/mo)", step=50.0, key='util_monthly')
             st.number_input("Insurance ($/mo)", step=50.0, key='ins_monthly')
@@ -222,7 +223,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     
     # Global Controls
     c_proj1, c_proj2 = st.columns(2)
-    time_horizon = c_proj1.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years")
+    time_horizon = c_proj1.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years", key="time_horizon_select")
     
     if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Annual"
     b1, b2, b3 = c_proj2.columns(3)

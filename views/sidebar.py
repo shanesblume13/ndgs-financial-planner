@@ -3,14 +3,16 @@ import os
 import json
 import datetime
 import io
-from model import BusinessEvent, BASE_REVENUE_MONTHLY
+from model import BusinessEvent
 from services.ai_service import ask_ai
 
 # Constants
 DEFAULT_PROPERTY_VALUE = 350000.0
+DEFAULT_BASE_REVENUE = 425000.0
 
 def initialize_session_state():
     # Core V1
+    if 'base_annual_revenue' not in st.session_state: st.session_state['base_annual_revenue'] = DEFAULT_BASE_REVENUE
     if 'operating_hours' not in st.session_state: st.session_state['operating_hours'] = 14
     if 'manager_wage_hourly' not in st.session_state: st.session_state['manager_wage_hourly'] = 20.0
     if 'manager_weekly_hours' not in st.session_state: st.session_state['manager_weekly_hours'] = 40.0
@@ -67,7 +69,10 @@ def initialize_session_state():
     if 'events' not in st.session_state: st.session_state['events'] = []
     
     # Phase 16: Date Management
-    if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date(2026, 1, 1)
+    if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date.today()
+    
+    # Dashboard View State
+    if 'time_horizon_select' not in st.session_state: st.session_state['time_horizon_select'] = 10
 
 def render_sidebar():
     initialize_session_state()
@@ -75,7 +80,7 @@ def render_sidebar():
     # Placeholder for AI (Top of Sidebar)
     ai_container = st.sidebar.container()
     
-    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=True):
+    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=False):
         st.write("Save your settings to a CSV file or restore from one.")
         
         # --- EXPORT ---
@@ -136,6 +141,7 @@ def render_sidebar():
                     # 2. Apply Scalars
                     # V1 & V2 keys
                     keys_to_load = [
+                        'base_annual_revenue',
                         'operating_hours', 'manager_wage_hourly', 'manager_weekly_hours', 'hourly_wage', 'avg_staff', 
                         'gross_margin_pct', 'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
                         'loan_amount', 'interest_rate', 'amortization_years',
@@ -259,7 +265,7 @@ def get_model_config():
         "expense_growth_rate": st.session_state['exp_growth'],
         "wage_growth_rate": st.session_state['wage_growth'],
         "rent_escalation_rate": st.session_state['rent_escalation'],
-        "base_revenue": BASE_REVENUE_MONTHLY,
+        "base_revenue": st.session_state['base_annual_revenue'] / 12.0,
         "gross_margin_pct": st.session_state['gross_margin_pct'],
         
         "operating_hours": st.session_state['operating_hours'],
