@@ -19,6 +19,7 @@ COLUMN_DISPLAY_MAP = {
     'Prop_Debt': 'Debt Service',
     'Prop_Tax': 'Property Tax',
     'Store_Net': 'Net Operating Profit',
+    'Prop_Revenue': 'Total Property Revenue',
     'Prop_Net': 'Net Property Income',
     'Owner_Cash_Flow': 'Net Cash Flow',
     'Cash_Balance': 'Cash on Hand',
@@ -42,29 +43,53 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     st.header("Financial Performance Dashboard")
     
     # --- TABS: INPUTS & DATA ---
-    tab_acq, tab_re, tab_ops, tab_staff, tab_growth, tab_events = st.tabs([
-        "🤝 Acquisition", "🏢 Real Estate", "⚙️ Operations", "👥 Staffing", "📈 Growth", "✨ Events"
+    tab_acq, tab_re, tab_rev, tab_opex, tab_staff, tab_events = st.tabs([
+        "🤝 Acquisition", "🏢 Real Estate", "📈 Revenue & COGS", "🏢 Overhead & OpEx", "👥 Staffing", "✨ Events"
     ])
     
-    # 1. Operations Tab
-    with tab_ops:
-        st.caption("Operating Expenses & Fixed Costs")
+    # 3. Revenue & COGS Tab
+    with tab_rev:
+        st.caption("Revenue Configuration, COGS & Growth")
         with st.expander("Settings", expanded=False):
             c1, c2 = st.columns(2)
             with c1:
                 st.number_input("Base Annual Revenue ($)", min_value=100000.0, step=10000.0, key='base_annual_revenue', help="Starting baseline before growth & seasonality")
-                st.slider("Daily Operating Hours", 6, 24, key='operating_hours')
+                st.slider("Revenue Growth (%)", -5.0, 10.0, key='rev_growth')
+            with c2:
+                st.slider("Gross Profit Margin (%)", 0, 100, step=5, key='gross_margin_pct')
+                st.markdown("##### Seasonality Factors")
+                st.slider("Q1 (Winter)", 0.5, 1.5, key='seasonality_q1')
+                st.slider("Q2 (Spring)", 0.5, 1.5, key='seasonality_q2')
+                st.slider("Q3 (Summer)", 0.5, 1.5, key='seasonality_q3')
+                st.slider("Q4 (Fall)", 0.5, 1.5, key='seasonality_q4')
+            
+        with st.expander("📄 Income Data", expanded=True):
+             # Filter cols for Income
+             inc_cols = ['Year', 'Store_Revenue', 'Store_COGS']
+             df_inc = df_projection.groupby('Year')[inc_cols[1:]].sum().reset_index()
+             # RENAMING
+             df_inc_display = df_inc.rename(columns=COLUMN_DISPLAY_MAP)
+             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in inc_cols[1:]]
+             
+             st.dataframe(df_inc_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
+
+    # 4. Overhead & OpEx Tab
+    with tab_opex:
+        st.caption("Fixed Operating Expenses & Inflation")
+        with st.expander("Settings", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.slider("Expense Inflation (%)", -5.0, 10.0, key='exp_growth')
                 st.number_input("Utilities ($/mo)", step=50.0, key='util_monthly')
                 st.number_input("Insurance ($/mo)", step=50.0, key='ins_monthly')
             with c2:
-                st.slider("Gross Profit Margin (%)", 0, 100, step=5, key='gross_margin_pct')
                 st.number_input("Maintenance ($/mo)", step=50.0, key='maint_monthly')
                 st.number_input("Marketing ($/mo)", step=50.0, key='mktg_monthly')
                 st.number_input("Professional Fees ($/mo)", step=50.0, key='prof_monthly')
             
-        with st.expander("📄 Operating Data", expanded=True):
+        with st.expander("📄 Expense Data", expanded=True):
              # Filter cols for Ops
-             ops_cols = ['Year', 'Store_Ops_Ex', 'Ex_Util', 'Ex_Ins', 'Ex_Maint', 'Ex_Mktg', 'Ex_Prof']
+             ops_cols = ['Year', 'Store_Ops_Ex', 'Store_Rent_Ex', 'Ex_Util', 'Ex_Ins', 'Ex_Maint', 'Ex_Mktg', 'Ex_Prof']
              # Aggregate annual for readability in this context
              df_ops = df_projection.groupby('Year')[ops_cols[1:]].sum().reset_index()
              # RENAMING
@@ -80,6 +105,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         with st.expander("Settings", expanded=False):
             c1, c2 = st.columns(2)
             with c1:
+                 st.slider("Daily Operating Hours", 6, 24, key='operating_hours')
                  st.slider("Avg Staff on Shift", 1.0, 5.0, step=0.5, key='avg_staff')
                  st.slider("Hourly Staff Wage ($/hr)", 10, 30, key='hourly_wage')
                  st.slider("Wage Growth (%)", 0.0, 10.0, key='wage_growth')
@@ -98,30 +124,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
              
              st.dataframe(df_lab_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
 
-    # 3. Growth Tab
-    with tab_growth:
-         st.caption("Revenue Growth, Inflation & Seasonality")
-         with st.expander("Settings", expanded=False):
-             c1, c2 = st.columns(2)
-             with c1:
-                st.slider("Revenue Growth (%)", -5.0, 10.0, key='rev_growth')
-                st.slider("Expense Inflation (%)", -5.0, 10.0, key='exp_growth')
-                st.slider("Rent Escalation (%)", 0.0, 10.0, key='rent_escalation')
-             with c2:
-                st.markdown("##### Seasonality Factors")
-                st.slider("Q1 (Winter)", 0.5, 1.5, key='seasonality_q1')
-                st.slider("Q2 (Spring)", 0.5, 1.5, key='seasonality_q2')
-                st.slider("Q3 (Summer)", 0.5, 1.5, key='seasonality_q3')
-                st.slider("Q4 (Fall)", 0.5, 1.5, key='seasonality_q4')
-            
-         with st.expander("📄 Growth Data", expanded=True):
-             growth_cols = ['Year', 'Store_Revenue', 'Store_COGS']
-             df_growth = df_projection.groupby('Year')[growth_cols[1:]].sum().reset_index()
-             # RENAMING
-             df_growth_display = df_growth.rename(columns=COLUMN_DISPLAY_MAP)
-             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in growth_cols[1:]]
-             
-             st.dataframe(df_growth_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
+
 
     # 4. Acquisition Tab
     with tab_acq:
@@ -199,19 +202,28 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
             with c2:
                  st.number_input("Property Tax (Annual $)", step=500.0, key='property_tax_annual')
                  st.number_input("Appreciation Rate (%)", step=0.5, key='property_appreciation_rate')
+                 st.slider("Rent Escalation (%)", 0.0, 10.0, key='rent_escalation')
              
         with st.expander("📄 Property Data", expanded=True):
              # We will update these columns once model is updated
              if 'Property_Equity' in df_projection.columns:
-                 prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Property_Value', 'Property_Equity']
+                 prop_agg = {
+                     'Prop_Revenue': 'sum',
+                     'Prop_Net': 'sum', 'Prop_Debt': 'sum', 
+                     'Property_Value': 'last', 'Property_Equity': 'last'
+                 }
              else:
-                 prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Prop_Cum']
-             
-             df_prop = df_projection.groupby('Year')[prop_cols[1:]].apply(lambda x: x.iloc[-1] if x.name in ['Property_Value', 'Property_Equity', 'Prop_Cum'] else x.sum()).reset_index()
+                 prop_agg = {
+                     'Prop_Net': 'sum', 'Prop_Debt': 'sum', 
+                     'Prop_Cum': 'last'
+                 }
+                 
+             df_prop = df_projection.groupby('Year').agg(prop_agg).reset_index()
              
              # RENAMING
              df_prop_display = df_prop.rename(columns=COLUMN_DISPLAY_MAP)
-             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in prop_cols[1:]]
+             # Get cols dynamically from the aggregated result
+             display_cols = [c for c in df_prop_display.columns if c != 'Year']
              
              st.dataframe(df_prop_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
 

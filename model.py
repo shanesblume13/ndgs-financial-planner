@@ -374,6 +374,7 @@ class FinancialModel:
                 
                 "Prop_Debt": -prop_debt_total,
                 "Prop_Tax": -monthly_prop_tax,
+                "Prop_Revenue": prop_total_income,
                 
                 "Store_Net": store_net_cash,
                 "Prop_Net": prop_net_cash,

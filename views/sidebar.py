@@ -5,6 +5,7 @@ import datetime
 import io
 from model import BusinessEvent
 from services.ai_service import ask_ai
+import glob
 
 # Constants
 DEFAULT_PROPERTY_VALUE = 350000.0
@@ -83,6 +84,29 @@ def render_sidebar():
     with st.sidebar.expander("📂 File Management (Export/Import)", expanded=False):
         st.write("Save your settings to a CSV file or restore from one.")
         
+        # --- SCENARIOS (Formerly Presets) ---
+        st.markdown("##### 📂 Load Scenario")
+        scenario_files = glob.glob("assets/presets/*.csv")
+        if scenario_files:
+            scenario_options = [os.path.basename(p) for p in scenario_files]
+            selected_scenario = st.selectbox("Select Scenario", scenario_options, index=None, placeholder="Choose a scenario...")
+            
+            if selected_scenario:
+                if st.button(f"Load {selected_scenario}"):
+                    full_path = os.path.join("assets/presets", selected_scenario)
+                    try:
+                        with open(full_path, "r") as f:
+                            csv_content = f.read()
+                        _parse_and_apply_settings(csv_content)
+                        st.success(f"Loaded {selected_scenario}!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error loading scenario: {e}")
+        else:
+            st.caption("No scenarios found in assets/presets/")
+            
+        st.divider()
+        
         # --- EXPORT ---
         # 1. Gather Data
         current_state = {k: st.session_state[k] for k in st.session_state.keys() if k not in ['events', 'events_data']}
@@ -141,63 +165,83 @@ def render_sidebar():
                     imported_data[key] = val
                 
                 if st.button("Apply Uploaded Settings"):
-                    # 2. Apply Scalars
-                    # V1 & V2 keys
-                    keys_to_load = [
-                        'base_annual_revenue',
-                        'operating_hours', 'manager_wage_hourly', 'manager_weekly_hours', 'hourly_wage', 'avg_staff', 
-                        'gross_margin_pct', 'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
-                        'loan_amount', 'interest_rate', 'amortization_years',
-                        'rental_income_res', 'rental_income_comm',
-                        'seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
-                        'rev_growth', 'exp_growth', 'wage_growth', 'rent_escalation',
-                        'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly',
-                        'initial_equity', 'initial_inventory',
-                        'initial_equity', 'initial_inventory',
-                        'intangible_assets', 'initial_property_value', 'closing_costs',
-                        'property_tax_annual', 'property_appreciation_rate'
-                    ]
-                    
-                    for k in keys_to_load:
-                        if k in imported_data:
-                            try:
-                                if k in st.session_state and isinstance(st.session_state[k], int):
-                                     st.session_state[k] = int(float(imported_data[k]))
-                                elif k in st.session_state and isinstance(st.session_state[k], float):
-                                     st.session_state[k] = float(imported_data[k])
-                                else:
-                                     # Fallback try generic
-                                     st.session_state[k] = float(imported_data[k])
-                            except:
-                                pass 
-
-                    # Date
-                    if 'start_date' in imported_data:
-                         try:
-                            st.session_state['start_date'] = datetime.datetime.strptime(imported_data['start_date'], "%Y-%m-%d").date()
-                         except:
-                            pass
-                    
-                    # 3. Apply Events
-                    ev_data_list = []
-                    
-                    if 'events_data' in imported_data:
-                        try:
-                            ev_data_list = json.loads(imported_data['events_data'])
-                        except: pass
-
-                    # Restore events
-                    if ev_data_list:
-                        st.session_state['events_data'] = ev_data_list # Logic for UI list
-                        st.session_state['events'] = [] # Logic for engine will rebuild in _render_events
-                    
-                    st.success("Settings Restored!")
+                    _parse_and_apply_settings(uploaded_file.getvalue().decode("utf-8"))
                     st.rerun()
 
             except Exception as e:
                 st.error(f"Error parsing file: {e}")
-                
+
+
+            
     return ai_container
+
+def _parse_and_apply_settings(csv_string_content):
+    """Parses a CSV string and applies values to session state."""
+    try:
+        # 1. Parse CSV
+        stringio = io.StringIO(csv_string_content)
+        imported_data = {}
+        for line in stringio:
+            if "," not in line or line.startswith("Key,Value"): continue
+            key, val = line.strip().split(",", 1)
+            imported_data[key] = val
+        
+        # 2. Apply Scalars
+        # V1 & V2 keys
+        keys_to_load = [
+            'base_annual_revenue',
+            'operating_hours', 'manager_wage_hourly', 'manager_weekly_hours', 'hourly_wage', 'avg_staff', 
+            'gross_margin_pct', 'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
+            'loan_amount', 'interest_rate', 'amortization_years',
+            'rental_income_res', 'rental_income_comm',
+            'seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
+            'rev_growth', 'exp_growth', 'wage_growth', 'rent_escalation',
+            'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly',
+            'initial_equity', 'initial_inventory',
+            'initial_equity', 'initial_inventory',
+            'intangible_assets', 'initial_property_value', 'closing_costs',
+            'property_tax_annual', 'property_appreciation_rate'
+        ]
+        
+        for k in keys_to_load:
+            if k in imported_data:
+                try:
+                    if k in st.session_state and isinstance(st.session_state[k], int):
+                            st.session_state[k] = int(float(imported_data[k]))
+                    elif k in st.session_state and isinstance(st.session_state[k], float):
+                            st.session_state[k] = float(imported_data[k])
+                    else:
+                            # Fallback try generic
+                            st.session_state[k] = float(imported_data[k])
+                except:
+                    pass 
+
+        # Date
+        if 'start_date' in imported_data:
+                try:
+                # Expecting YYYY-MM-DD
+                    dt_obj = datetime.datetime.strptime(imported_data['start_date'], "%Y-%m-%d").date()
+                    st.session_state['start_date'] = dt_obj
+                except:
+                    pass
+        
+        # 3. Apply Events
+        ev_data_list = []
+        
+        if 'events_data' in imported_data:
+            try:
+                ev_data_list = json.loads(imported_data['events_data'])
+            except: pass
+
+        # Restore events
+        if ev_data_list:
+            st.session_state['events_data'] = ev_data_list # Logic for UI list
+            st.session_state['events'] = [] # Logic for engine will rebuild in _render_events
+        
+        st.toast("Settings Applied Successfully", icon="✅")
+
+    except Exception as e:
+        st.error(f"Error parsing file: {e}")
 
 def render_ai_cfo(container, df_projection, model_events, inputs_summary):
     """Renders the AI CFO interface into the provided sidebar container."""
