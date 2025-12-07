@@ -63,6 +63,7 @@ class FinancialModel:
     interest_rate: float
     amortization_years: int
     initial_inventory: float # New: Startup Inventory
+    initial_renovations: float # New: Startup Renovations (Capex)
     initial_equity: float # New: Startup Capital
     
     intangible_assets: float # New: Licenses, Goodwill
@@ -103,12 +104,12 @@ class FinancialModel:
         # Uses = Property + Intangibles + Inventory
         
         sources = self.initial_equity + self.loan_amount
-        uses = self.initial_property_value + self.intangible_assets + self.initial_inventory + self.closing_costs
+        uses = self.initial_property_value + self.intangible_assets + self.initial_inventory + self.initial_renovations + self.closing_costs
         
         cash_balance = sources - uses
         
         # Track Asset Values per category
-        cumulative_capex = self.initial_inventory # Tracking Inventory as part of "Physical/Capex" stack for now
+        cumulative_capex = self.initial_inventory + self.initial_renovations # Tracking Inventory as part of "Physical/Capex" stack for now
         
         # Asset Tracking
         current_loan_balance = self.loan_amount

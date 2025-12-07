@@ -55,6 +55,7 @@ def initialize_session_state():
 
     # New: Initial Capex & Equity
     if 'initial_inventory' not in st.session_state: st.session_state['initial_inventory'] = 30000.0
+    if 'initial_renovations' not in st.session_state: st.session_state['initial_renovations'] = 20000.0
     if 'initial_equity' not in st.session_state: st.session_state['initial_equity'] = 150000.0
     if 'intangible_assets' not in st.session_state: st.session_state['intangible_assets'] = 150000.0
     if 'acquisition_price' not in st.session_state: st.session_state['acquisition_price'] = 400000.0 # Default total
@@ -219,8 +220,7 @@ def _parse_and_apply_settings(csv_string_content):
             'seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
             'rev_growth', 'exp_growth', 'wage_growth', 'rent_escalation',
             'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly',
-            'initial_equity', 'initial_inventory',
-            'initial_equity', 'initial_inventory',
+            'initial_equity', 'initial_inventory', 'initial_renovations',
             'intangible_assets', 'initial_property_value', 'closing_costs',
             'property_tax_annual', 'property_appreciation_rate'
         ]
@@ -357,6 +357,7 @@ def get_model_config():
         
         "initial_equity": st.session_state['initial_equity'],
         "initial_inventory": st.session_state['initial_inventory'],
+        "initial_renovations": st.session_state['initial_renovations'],
         "intangible_assets": st.session_state['intangible_assets'],
         "closing_costs": st.session_state['closing_costs'],
         # Derived: Property Value = Total Price - Intangibles

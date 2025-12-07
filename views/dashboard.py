@@ -143,6 +143,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
                  st.caption(f"implied Real Estate Value: ${re_val:,.2f}")
                  
                  st.number_input("Initial Inventory ($)", step=1000.0, key='initial_inventory')
+                 st.number_input("Initial Renovations ($)", step=1000.0, key='initial_renovations')
                  
             with c2:
                  st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
@@ -159,8 +160,8 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         # Calculations
         tot_sources = st.session_state['loan_amount'] + st.session_state['initial_equity']
         
-        # Uses: Total Acquisition (RE + Intangibles) + Inventory + Closing Costs
-        tot_uses = st.session_state['acquisition_price'] + st.session_state['initial_inventory'] + st.session_state['closing_costs']
+        # Uses: Total Acquisition (RE + Intangibles) + Inventory + Renovations + Closing Costs
+        tot_uses = st.session_state['acquisition_price'] + st.session_state['initial_inventory'] + st.session_state['initial_renovations'] + st.session_state['closing_costs']
         net_cash = tot_sources - tot_uses
         
         with su_col1:
@@ -173,6 +174,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
                 {"Category": "Acquisition (Intangibles)", "Amount": st.session_state['intangible_assets']},
                 {"Category": "Closing Costs", "Amount": st.session_state['closing_costs']},
                 {"Category": "Initial Inventory", "Amount": st.session_state['initial_inventory']},
+                {"Category": "Initial Renovations", "Amount": st.session_state['initial_renovations']},
                 {"Category": "TOTAL USES", "Amount": tot_uses}
             ])
             st.dataframe(df_uses.style.format("${:,.2f}", subset="Amount"), use_container_width=True, hide_index=True)
@@ -270,7 +272,8 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         'Cash_Balance': 'last', 'Cum_Capex': 'last',
         'Property_Value': 'last', 'Property_Equity': 'last', 'Intangible_Assets': 'last',
         'Loan_Balance': 'last',
-        'Net_Event_Impact': 'sum' # Add Net Event Impact
+        'Net_Event_Impact': 'sum', # Add Net Event Impact
+        'Capex': 'sum' # Add Capex for Pro Forma row
     }
     
     # Add dynamic event columns to aggregation
@@ -584,15 +587,17 @@ def _generate_pro_forma(df_agg, periods):
     data['Gross Profit'] = gross_profit
     
     # 4. Operating Expenses
-    # Store Labor + Store Ops + Prop Tax
+    # Store Labor + Store Ops + Store Rent + Prop Tax
     labor = df_agg['Store_Labor']
     ops = df_agg['Store_Ops_Ex']
+    rent_ex = df_agg['Store_Rent_Ex']
     # Prop Tax
     
-    total_opex = labor + ops + prop_tax
+    total_opex = labor + ops + rent_ex + prop_tax
     
     data['Labor'] = labor
     data['OpEx (Store)'] = ops
+    data['Rent (Commercial)'] = rent_ex
     data['Property Tax'] = prop_tax
     data['Total OpEx'] = total_opex
     
@@ -601,20 +606,28 @@ def _generate_pro_forma(df_agg, periods):
     data['Net Operating Income (NOI)'] = noi
     
     # 6. Debt Service
-    data['Debt Service'] = prop_debt
+    data['Debt Service (P&I)'] = prop_debt
     
-    # 7. Net Cash Flow
-    # NOI + Debt 
-    # (Capex is asset/equity move, usually below line for cash flow, but for Income Statement 'Net Income'...)
-    # Let's show Net Cash Flow (Pre-Tax)
-    ncf = noi + prop_debt
+    # 8. Capital Expenditures (Capex)
+    capex = df_agg.get('Capex', 0.0)
+    data['Capital Expenditures'] = capex
+
+    # 9. Net Cash Flow
+    # NOI + Debt + Capex (Capex is negative)
+    ncf = noi + prop_debt + capex
     data['Net Cash Flow'] = ncf
     
-    # 8. Event Impact (Memo)
-    if 'Net_Event_Impact' in df_agg.columns:
-         data['Memo: Net Event Impact'] = df_agg['Net_Event_Impact']
+    # 10. DSCR (Debt Service Coverage Ratio)
+    # NOI / Abs(Debt Service)
+    # Avoid division by zero
+    def calc_dscr(n, d):
+        if d == 0: return 0.0
+        return n / abs(d)
+        
+    dscr_series = pd.Series([calc_dscr(n, d) for n, d in zip(noi, prop_debt)])
+    data['DSCR'] = dscr_series
 
-    # 9. Balance Sheet Items (End of Period)
+    # 11. Balance Sheet Items (End of Period)
     if 'Cash_Balance' in df_agg.columns:
         data['Cash on Hand (End of Period)'] = df_agg['Cash_Balance']
     
@@ -625,14 +638,60 @@ def _generate_pro_forma(df_agg, periods):
     df_t = df.T
     df_t.columns = periods
     
+    # Add Total Column if Monthly view
+    # (We check if 'periods' looks like months, simplistic check: if length > 4 or just do it for all if meaningful)
+    # Actually, simpler: sum the numeric source data 'df' before transposing.
+    # But wait, balance sheet items (Cash Balance) should be LAST, not SUM.
+    
+    # List of Flow items to SUM
+    sum_cols = ['Revenue (Operations)', 'Revenue (Real Estate)', 'Total Revenue', 
+                'COGS', 'Gross Profit', 
+                'Labor', 'OpEx (Store)', 'Rent (Commercial)', 'Property Tax', 'Total OpEx',
+                'Net Operating Income (NOI)', 'Debt Service (P&I)', 'Capital Expenditures', 'Net Cash Flow']
+    
+    # List of Stock items to LAST (or average, but usually last for balance)
+    last_cols = ['Cash on Hand (End of Period)']
+    
+    # Create Total series
+    total_series = pd.Series(index=df.columns)
+    
+    for c in df.columns:
+        if c in sum_cols:
+            total_series[c] = df[c].sum()
+        elif c in last_cols:
+             # Last value
+             total_series[c] = df[c].iloc[-1]
+        elif c == 'DSCR':
+             # Recalculate DSCR based on Totals
+             t_noi = df['Net Operating Income (NOI)'].sum()
+             t_debt = df['Debt Service (P&I)'].sum()
+             total_series[c] = calc_dscr(t_noi, t_debt)
+        else:
+            total_series[c] = 0.0 # Default
+    
+    # Add Total to df_t (which is Transposed, so we add a new Column)
+    df_t['TOTAL'] = total_series
+    
     # Formatting helper
     def fmt(x):
         try:
-            return f"${x:,.0f}"
+             # DSCR Formatting
+             if isinstance(x, float) and x < 100 and x > -100 and x != 0: # Heuristic for ratio
+                  # Check if it's the DSCR row? Logic is hard inside map without index access.
+                  pass
+             
+             return f"${x:,.0f}"
         except:
             return x
             
-    return df_t.applymap(fmt)
+    # Apply standard formatting then custom overriding for DSCR
+    df_formatted = df_t.applymap(fmt)
+    
+    # Override DSCR formatting
+    if 'DSCR' in df_formatted.index:
+         df_formatted.loc['DSCR'] = df_t.loc['DSCR'].apply(lambda x: f"{x:.2f}x")
+
+    return df_formatted
 
 
 
