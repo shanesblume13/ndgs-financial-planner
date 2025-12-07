@@ -223,34 +223,31 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         
     st.divider()
 
-    # --- GLOBAL VISUALIZATIONS ---
-    st.subheader("Global Financial Analysis")
-    
-    # Global Controls
-    c_proj1, c_proj2 = st.columns(2)
-    time_horizon = c_proj1.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years", key="time_horizon_select")
-    
-    if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Annual"
-    b1, b2, b3 = c_proj2.columns(3)
-    if b1.button("Annual", use_container_width=True): st.session_state['view_agg'] = "Annual"
-    if b2.button("Quarterly", use_container_width=True): st.session_state['view_agg'] = "Quarterly"
-    if b3.button("Monthly", use_container_width=True): st.session_state['view_agg'] = "Monthly"
-    aggregation = st.session_state['view_agg']
+    st.divider()
 
-    # Prep Data
+    # --- GLOBAL REPORT & ANALYSIS ---
+    st.header("Global Report & Analysis")
+    
+    # 1. Global Controls
+    c_proj1, c_proj2 = st.columns(2)
+    with c_proj1:
+        time_horizon = st.selectbox("Time Horizon", [1, 3, 5, 10], index=3, format_func=lambda x: f"{x} Years", key="time_horizon_select")
+    
+    with c_proj2:
+        if 'view_agg' not in st.session_state: st.session_state['view_agg'] = "Annual"
+        b1, b2, b3 = st.columns(3)
+        if b1.button("Annual", use_container_width=True): st.session_state['view_agg'] = "Annual"
+        if b2.button("Quarterly", use_container_width=True): st.session_state['view_agg'] = "Quarterly"
+        if b3.button("Monthly", use_container_width=True): st.session_state['view_agg'] = "Monthly"
+        aggregation = st.session_state['view_agg']
+
+    # 2. Data Preparation
     df_view = df_projection[df_projection['Project_Year'] <= time_horizon].copy()
     
     # Calculate EBITDA (Before aggregation)
-    # EBITDA = Rev + (COGS + Labor + Ops_Ex). Note: Expenses are negative in DF.
     df_view['EBITDA'] = df_view['Store_Revenue'] + df_view['Store_COGS'] + df_view['Store_Labor'] + df_view['Store_Ops_Ex']
 
-    # Aggregation Logic (Shared)
-    agg_dict = {
-        'Store_Revenue': 'sum', 'Store_COGS': 'sum', 'Store_Labor': 'sum', 'Store_Ops_Ex': 'sum', 'Store_Net': 'sum',
-        'Prop_Net': 'sum', 'Owner_Cash_Flow': 'sum', 'Owner_Cum': 'last', 'EBITDA': 'sum',
-        'Cash_Balance': 'last', 'Cum_Capex': 'last'
-    }
-    
+    # Aggregation Logic
     agg_dict = {
         'Store_Revenue': 'sum', 'Store_COGS': 'sum', 'Store_Labor': 'sum', 'Store_Ops_Ex': 'sum', 'Store_Net': 'sum',
         'Prop_Net': 'sum', 'Owner_Cash_Flow': 'sum', 'Owner_Cum': 'last', 'EBITDA': 'sum',
@@ -271,7 +268,15 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
          x_axis = df_view.apply(lambda row: f"{date(int(row['Year']), int(row['Month']), 1).strftime('%b %Y')}", axis=1)
          df_display = df_view # Monthly is default granularity
 
-    # 1. Main Cash Flow Chart
+    # 3. Pro Forma Financial Statements (Table First)
+    st.subheader("Pro Forma Financial Statements")
+    df_pro_forma = _generate_pro_forma(df_display, x_axis)
+    st.dataframe(df_pro_forma, use_container_width=True)
+
+    # 4. Visualizations
+    st.subheader("Financial Visualizations")
+    
+    # Chart 1: Cash Flow & Assets
     total_cf = df_display['Owner_Cash_Flow'].sum()
     st.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.2f}")
     
@@ -285,7 +290,6 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     ))
     
     # 2. Area: Physical Assets (Right Axis, Stack Group A)
-    # Renamed to "Other Assets (Capex)" for clarity if we have explicit Prop Equity
     fig_owner.add_trace(go.Scatter(
         x=x_axis, y=df_display['Cum_Capex'], mode='lines', name=COLUMN_DISPLAY_MAP['Cum_Capex'], 
         line=dict(color='orange', width=0), 
@@ -358,16 +362,11 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     )
     st.plotly_chart(fig_owner, width="stretch", key="glob_chart_cf")
 
-    # 1.5 Capital Structure (Balance Sheet Visualization)
-    st.subheader("Capital Structure (Assets vs Debt)")
-    
-    # Calculate Components
+    # Chart 2: Capital Structure (Balance Sheet Visualization)
     # Assets (Positive)
     asset_series = df_display['Cash_Balance'] + df_display['Cum_Capex'] + df_display['Property_Value'] + df_display['Intangible_Assets']
-    
     # Debt (Negative)
     debt_series = -df_display['Loan_Balance']
-    
     # Equity (Net) = Assets + Debt (since debt is negative)
     equity_series = asset_series + debt_series
     
@@ -403,8 +402,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     )
     st.plotly_chart(fig_cap, width="stretch", key="glob_chart_cap_struct")
 
-    # 2. Profitability Analysis (EBITDA vs Net)
-    st.subheader("Profitability Trends")
+    # Chart 3: Profitability Analysis (EBITDA vs Net)
     fig_ebitda = go.Figure()
     fig_ebitda.add_trace(go.Scatter(
         x=x_axis, y=df_display['EBITDA'], name='EBITDA', 
@@ -420,8 +418,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     fig_ebitda.update_layout(title=f"EBITDA vs {COLUMN_DISPLAY_MAP['Store_Net']}", hovermode="x unified", legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_ebitda, width="stretch", key="glob_chart_ebitda")
 
-    # 3. Income & Expense Analysis (Combo Chart)
-    st.subheader("Income & Expense Breakdown")
+    # Chart 4: Income & Expense Breakdown
     fig_combo = go.Figure()
     
     # Revenue (Positive)
@@ -432,15 +429,11 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     ))
     
     # Expenses (Negative)
-    # Stacked relative allows positive and negative to stack on respective sides of 0
     fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_COGS'], name=COLUMN_DISPLAY_MAP['Store_COGS'], marker_color='lightblue', hovertemplate='$%{y:,.2f}<extra></extra>'))
     fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Labor'], name=COLUMN_DISPLAY_MAP['Store_Labor'], marker_color='blue', hovertemplate='$%{y:,.2f}<extra></extra>'))
     fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Ops_Ex'], name=COLUMN_DISPLAY_MAP['Store_Ops_Ex'], marker_color='pink', hovertemplate='$%{y:,.2f}<extra></extra>'))
     
     # Net Profit Line (Right Axis - y2)
-    # Calculated as Sum of all above (Rev + Expenses[neg])
-    # Which equals Store_Net in our model
-    # Note: Store_Net is "Net Operating Profit"
     fig_combo.add_trace(go.Scatter(
         x=x_axis, y=df_display['Store_Net'], 
         name=COLUMN_DISPLAY_MAP['Store_Net'], mode='lines+markers',
@@ -450,21 +443,8 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     ))
     
     # Custom Axis Alignment
-    # Axis 1 (Left): Measures Revenue and Expenses (Stacked Bars)
-    # Note: In 'relative' bar mode, the axis extent is determined by sum of pos/neg stacks.
-    # We need to compute the max positive stack and max negative stack per X to find range.
-    
-    # Simple approx: Max(Rev), Max(Abs(Expenses))
-    # Better: explicit stack sum
-    
-    # We can rely on matplotlib/plotly auto-range logic or calculate manually.
-    # To align zero, we MUST calculate manually.
-    
-    # Max Positive Stack = Revenue (easy, only one pos bar)
     max_pos_stack = df_display['Store_Revenue'].max()
     
-    # Max Negative Stack = Sum of COGS + Labor + Ops (all neg)
-    # All are negative numbers, so sum is min value.
     df_display['Total_Exp_Stack'] = df_display['Store_COGS'] + df_display['Store_Labor'] + df_display['Store_Ops_Ex']
     min_neg_stack = df_display['Total_Exp_Stack'].min()
     
@@ -487,17 +467,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     )
     st.plotly_chart(fig_combo, width="stretch", key="glob_chart_income_exp")
     
-    # 5. Pro Forma Financial Statements
-    st.divider()
-    st.subheader("Pro Forma Financial Statements")
-    
-    # Generate Pro Forma DataFrame
-    df_pro_forma = _generate_pro_forma(df_display, x_axis)
-    
-    # Render
-    st.dataframe(df_pro_forma, use_container_width=True)
-
-    # 6. Financial Model Source Data (Detailed)
+    # 5. Financial Model Source Data (Detailed)
     with st.expander("📄 Source Data (Raw Model Output)", expanded=False):
         # Format all float columns
         # Rename for display

@@ -88,7 +88,10 @@ def render_sidebar():
         current_state = {k: st.session_state[k] for k in st.session_state.keys() if k not in ['events', 'events_data']}
         # Serialize events
         events_data = []
-        if 'events' in st.session_state:
+        if 'events_data' in st.session_state:
+            events_data = st.session_state['events_data']
+        # Fallback for safety if events_data missing but objects exist
+        elif 'events' in st.session_state:
             for e in st.session_state['events']:
                 events_data.append({
                     "name": e.name, 
