@@ -4,6 +4,36 @@ import plotly.graph_objects as go
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
+# --- CONFIGURATION ---
+COLUMN_DISPLAY_MAP = {
+    'Store_Revenue': 'Revenue',
+    'Store_COGS': 'Cost of Goods Sold',
+    'Store_Labor': 'Labor Costs',
+    'Store_Ops_Ex': 'Operating Expenses',
+    'Ex_Util': 'Utilities',
+    'Ex_Ins': 'Insurance',
+    'Ex_Maint': 'Maintenance',
+    'Ex_Mktg': 'Marketing',
+    'Ex_Prof': 'Professional Fees',
+    'Store_Rent_Ex': 'Rent Expense',
+    'Prop_Debt': 'Debt Service',
+    'Prop_Tax': 'Property Tax',
+    'Store_Net': 'Net Operating Profit',
+    'Prop_Net': 'Net Property Income',
+    'Owner_Cash_Flow': 'Net Cash Flow',
+    'Cash_Balance': 'Cash on Hand',
+    'Cum_Capex': 'Cumulative Capex',
+    'Property_Value': 'Property Value',
+    'Loan_Balance': 'Loan Balance',
+    'Property_Equity': 'Property Equity',
+    'Intangible_Assets': 'Intangible Assets',
+    'Store_Cum': 'Cumulative Store Profit',
+    'Prop_Cum': 'Cumulative Property Profit',
+    'Year': 'Year',
+    'Quarter': 'Quarter',
+    'Month': 'Month'
+}
+
 def render_dashboard(df_projection, model_events, inputs_summary, start_date=None):
     
     # Defaults
@@ -35,7 +65,12 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
              ops_cols = ['Year', 'Store_Ops_Ex', 'Ex_Util', 'Ex_Ins', 'Ex_Maint', 'Ex_Mktg', 'Ex_Prof']
              # Aggregate annual for readability in this context
              df_ops = df_projection.groupby('Year')[ops_cols[1:]].sum().reset_index()
-             st.dataframe(df_ops.style.format("${:,.2f}", subset=ops_cols[1:]), use_container_width=True)
+             # RENAMING
+             df_ops_display = df_ops.rename(columns=COLUMN_DISPLAY_MAP)
+             # Get the new column names for formatting subset (minus Year)
+             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in ops_cols[1:]]
+             
+             st.dataframe(df_ops_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
 
     # 2. Staffing Tab
     with tab_staff:
@@ -54,7 +89,11 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         with st.expander("📄 Staffing Data", expanded=True):
              lab_cols = ['Year', 'Store_Labor']
              df_lab = df_projection.groupby('Year')[lab_cols[1:]].sum().reset_index()
-             st.dataframe(df_lab.style.format("${:,.2f}", subset=lab_cols[1:]), use_container_width=True)
+             # RENAMING
+             df_lab_display = df_lab.rename(columns=COLUMN_DISPLAY_MAP)
+             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in lab_cols[1:]]
+             
+             st.dataframe(df_lab_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
 
     # 3. Growth Tab
     with tab_growth:
@@ -74,7 +113,11 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
          with st.expander("📄 Growth Data", expanded=True):
              growth_cols = ['Year', 'Store_Revenue', 'Store_COGS']
              df_growth = df_projection.groupby('Year')[growth_cols[1:]].sum().reset_index()
-             st.dataframe(df_growth.style.format("${:,.2f}", subset=growth_cols[1:]), use_container_width=True)
+             # RENAMING
+             df_growth_display = df_growth.rename(columns=COLUMN_DISPLAY_MAP)
+             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in growth_cols[1:]]
+             
+             st.dataframe(df_growth_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
 
     # 4. Acquisition Tab
     with tab_acq:
@@ -159,7 +202,12 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
                  prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Prop_Cum']
              
              df_prop = df_projection.groupby('Year')[prop_cols[1:]].apply(lambda x: x.iloc[-1] if x.name in ['Property_Value', 'Property_Equity', 'Prop_Cum'] else x.sum()).reset_index()
-             st.dataframe(df_prop.style.format("${:,.2f}", subset=prop_cols[1:]), use_container_width=True)
+             
+             # RENAMING
+             df_prop_display = df_prop.rename(columns=COLUMN_DISPLAY_MAP)
+             display_cols = [COLUMN_DISPLAY_MAP.get(c, c) for c in prop_cols[1:]]
+             
+             st.dataframe(df_prop_display.style.format("${:,.2f}", subset=display_cols), use_container_width=True)
 
     # 5. Events Tab
     with tab_events:
@@ -225,7 +273,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     
     # 1. Bars: Periodic Cash Flow (Left Axis)
     fig_owner.add_trace(go.Bar(
-        x=x_axis, y=df_display['Owner_Cash_Flow'], name='Periodic CF', 
+        x=x_axis, y=df_display['Owner_Cash_Flow'], name=COLUMN_DISPLAY_MAP['Owner_Cash_Flow'], 
         marker_color='lightgreen', hovertemplate='$%{y:,.2f}<extra></extra>',
         offsetgroup=0
     ))
@@ -233,7 +281,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 2. Area: Physical Assets (Right Axis, Stack Group A)
     # Renamed to "Other Assets (Capex)" for clarity if we have explicit Prop Equity
     fig_owner.add_trace(go.Scatter(
-        x=x_axis, y=df_display['Cum_Capex'], mode='lines', name='Capex/Improv.', 
+        x=x_axis, y=df_display['Cum_Capex'], mode='lines', name=COLUMN_DISPLAY_MAP['Cum_Capex'], 
         line=dict(color='orange', width=0), 
         fill='tozeroy',
         stackgroup='assets', # Stack with Cash
@@ -243,7 +291,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     
     # 3. Area: Intangible Assets
     fig_owner.add_trace(go.Scatter(
-        x=x_axis, y=df_display['Intangible_Assets'], mode='lines', name='Intangibles', 
+        x=x_axis, y=df_display['Intangible_Assets'], mode='lines', name=COLUMN_DISPLAY_MAP['Intangible_Assets'], 
         line=dict(color='violet', width=0), 
         fill='tonexty',
         stackgroup='assets', 
@@ -253,7 +301,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
 
     # 4. Area: Property Equity
     fig_owner.add_trace(go.Scatter(
-        x=x_axis, y=df_display['Property_Equity'], mode='lines', name='Property Equity', 
+        x=x_axis, y=df_display['Property_Equity'], mode='lines', name=COLUMN_DISPLAY_MAP['Property_Equity'], 
         line=dict(color='brown', width=0), 
         fill='tonexty',
         stackgroup='assets', 
@@ -263,7 +311,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     
     # 5. Area: Cash on Hand (Right Axis, Stack Group A)
     fig_owner.add_trace(go.Scatter(
-        x=x_axis, y=df_display['Cash_Balance'], mode='lines', name='Cash on Hand', 
+        x=x_axis, y=df_display['Cash_Balance'], mode='lines', name=COLUMN_DISPLAY_MAP['Cash_Balance'], 
         line=dict(color='blue', width=0), 
         fill='tonexty',
         stackgroup='assets',
@@ -295,7 +343,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     range1, range2 = _align_dual_axes(y1_min, y1_max, y2_min, y2_max)
 
     fig_owner.update_layout(
-        yaxis=dict(title="Periodic Cash Flow", range=range1),
+        yaxis=dict(title=COLUMN_DISPLAY_MAP['Owner_Cash_Flow'], range=range1),
         yaxis2=dict(title="Total Asset Value", overlaying='y', side='right', range=range2),
         title=f"Cash Flow & Asset Value ({aggregation})",
         hovermode="x unified",
@@ -358,12 +406,12 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
         hovertemplate='$%{y:,.2f}<extra></extra>'
     ))
     fig_ebitda.add_trace(go.Bar(
-        x=x_axis, y=df_display['Store_Net'], name='Net Profit (Post-Rent/Capex)', 
+        x=x_axis, y=df_display['Store_Net'], name=COLUMN_DISPLAY_MAP['Store_Net'], 
         marker_color='blue', 
         hovertemplate='$%{y:,.2f}<extra></extra>'
     ))
     
-    fig_ebitda.update_layout(title="EBITDA vs Net Profit", hovermode="x unified", legend=dict(orientation="h", y=1.1))
+    fig_ebitda.update_layout(title=f"EBITDA vs {COLUMN_DISPLAY_MAP['Store_Net']}", hovermode="x unified", legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_ebitda, width="stretch", key="glob_chart_ebitda")
 
     # 3. Income & Expense Analysis (Combo Chart)
@@ -373,22 +421,23 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # Revenue (Positive)
     fig_combo.add_trace(go.Bar(
         x=x_axis, y=df_display['Store_Revenue'], 
-        name='Revenue', marker_color='green',
+        name=COLUMN_DISPLAY_MAP['Store_Revenue'], marker_color='green',
         hovertemplate='$%{y:,.2f}<extra></extra>'
     ))
     
     # Expenses (Negative)
     # Stacked relative allows positive and negative to stack on respective sides of 0
-    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_COGS'], name='COGS', marker_color='lightblue', hovertemplate='$%{y:,.2f}<extra></extra>'))
-    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Labor'], name='Labor', marker_color='blue', hovertemplate='$%{y:,.2f}<extra></extra>'))
-    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Ops_Ex'], name='Ops Expenses', marker_color='pink', hovertemplate='$%{y:,.2f}<extra></extra>'))
+    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_COGS'], name=COLUMN_DISPLAY_MAP['Store_COGS'], marker_color='lightblue', hovertemplate='$%{y:,.2f}<extra></extra>'))
+    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Labor'], name=COLUMN_DISPLAY_MAP['Store_Labor'], marker_color='blue', hovertemplate='$%{y:,.2f}<extra></extra>'))
+    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Ops_Ex'], name=COLUMN_DISPLAY_MAP['Store_Ops_Ex'], marker_color='pink', hovertemplate='$%{y:,.2f}<extra></extra>'))
     
     # Net Profit Line (Right Axis - y2)
     # Calculated as Sum of all above (Rev + Expenses[neg])
     # Which equals Store_Net in our model
+    # Note: Store_Net is "Net Operating Profit"
     fig_combo.add_trace(go.Scatter(
         x=x_axis, y=df_display['Store_Net'], 
-        name='Net Profit', mode='lines+markers',
+        name=COLUMN_DISPLAY_MAP['Store_Net'], mode='lines+markers',
         line=dict(color='black', width=3),
         yaxis='y2',
         hovertemplate='$%{y:,.2f}<extra></extra>'
@@ -424,11 +473,11 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     
     fig_combo.update_layout(
         barmode='relative', 
-        title="Income, Expenses & Net Profit", 
+        title=f"Income, Expenses & {COLUMN_DISPLAY_MAP['Store_Net']}", 
         hovermode="x unified",
         legend=dict(orientation="h", y=1.1),
         yaxis=dict(title="Revenue & Expenses", range=range1),
-        yaxis2=dict(title="Net Profit", overlaying='y', side='right', range=range2)
+        yaxis2=dict(title=COLUMN_DISPLAY_MAP['Store_Net'], overlaying='y', side='right', range=range2)
     )
     st.plotly_chart(fig_combo, width="stretch", key="glob_chart_income_exp")
     
@@ -445,8 +494,14 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 6. Financial Model Source Data (Detailed)
     with st.expander("📄 Source Data (Raw Model Output)", expanded=False):
         # Format all float columns
-        float_cols = [c for c in df_projection.columns if df_projection[c].dtype == 'float64']
-        st.dataframe(df_projection.style.format("${:,.2f}", subset=float_cols), width="stretch")
+        # Rename for display
+        df_display_raw = df_projection.rename(columns=COLUMN_DISPLAY_MAP)
+        
+        # We need to find the NEW names of float columns
+        float_cols_raw = [c for c in df_projection.columns if df_projection[c].dtype == 'float64']
+        float_cols_display = [COLUMN_DISPLAY_MAP.get(c, c) for c in float_cols_raw]
+        
+        st.dataframe(df_display_raw.style.format("${:,.2f}", subset=float_cols_display), width="stretch")
 
 def _generate_pro_forma(df_agg, periods):
     """
