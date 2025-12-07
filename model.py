@@ -7,8 +7,8 @@ from dateutil.relativedelta import relativedelta
 
 # --- Constants ---
 # Updated Base Revenue to align with $425k/yr legacy pro forma
+# Updated Base Revenue to align with $425k/yr legacy pro forma
 BASE_REVENUE_MONTHLY = 425000.0 / 12.0
-BASE_COGS_PCT = 0.70
 DAYS_IN_MONTH = 30.5
 
 @dataclass
@@ -44,7 +44,7 @@ class FinancialModel:
     
     # Base Operations
     base_revenue: float
-    base_cogs_pct: float
+    gross_margin_pct: float
     operating_hours: int
     
     # Staffing
@@ -64,9 +64,18 @@ class FinancialModel:
     loan_amount: float
     interest_rate: float
     amortization_years: int
-    initial_capex: float # New field
+    initial_inventory: float # New: Startup Inventory
+    initial_equity: float # New: Startup Capital
+    
+    intangible_assets: float # New: Licenses, Goodwill
+    initial_property_value: float # New: Purchase Price
+    closing_costs: float # New: Fees, Legal, Title
+    
     commercial_rent_income: float
     residential_rent_income: float
+    
+    property_tax_annual: float # New: Annual Tax
+    property_appreciation_rate: float # New: Asset Growth
     
     
     
@@ -84,13 +93,30 @@ class FinancialModel:
             self.loan_amount, self.interest_rate, self.amortization_years
         )
         
-        # Initial Capex
-        initial_capex_cost = self.initial_capex
-
+        monthly_prop_tax = self.property_tax_annual / 12.0
+        
         cumulative_cash_owner = 0.0
         cumulative_cash_store = 0.0
         cumulative_cash_prop = 0.0
         
+        # New: Tracking Bank and Total Spend
+        # Startup Logic: Sources - Uses
+        # Sources = Equity + Loan
+        # Uses = Property + Intangibles + Inventory
+        
+        sources = self.initial_equity + self.loan_amount
+        uses = self.initial_property_value + self.intangible_assets + self.initial_inventory + self.closing_costs
+        
+        cash_balance = sources - uses
+        
+        # Track Asset Values per category
+        cumulative_capex = self.initial_inventory # Tracking Inventory as part of "Physical/Capex" stack for now
+        
+        # Asset Tracking
+        current_loan_balance = self.loan_amount
+        current_property_value = self.initial_property_value
+        
+        monthly_loan_rate = (self.interest_rate / 100.0) / 12.0
 
         for m in range(1, months + 1):
             # Calendar Calculations
@@ -109,6 +135,11 @@ class FinancialModel:
             wage_growth_factor = (1 + self.wage_growth_rate / 100.0) ** project_year_idx
             rent_growth_factor = (1 + self.rent_escalation_rate / 100.0) ** project_year_idx
             
+            # Property Value Growth (Monthly compounding approximation or Annual step?)
+            # Usually Annual step is cleaner for pro formas
+            prop_value_growth_factor = (1 + self.property_appreciation_rate / 100.0) ** project_year_idx
+            current_property_value_period = self.initial_property_value * prop_value_growth_factor
+            
             # Use Calendar Seasonality
             seasonality_factor = self.seasonality[cal_quarter_idx]
 
@@ -117,7 +148,9 @@ class FinancialModel:
             monthly_base_rev = self.base_revenue * rev_growth_factor * seasonality_factor
             
             # 2. COGS (Base)
-            cogs_base_amt = (self.base_revenue * self.base_cogs_pct) * rev_growth_factor * seasonality_factor
+            # COGS % = 100% - Gross Margin %
+            cogs_pct = 1.0 - (self.gross_margin_pct / 100.0)
+            cogs_base_amt = (self.base_revenue * cogs_pct) * rev_growth_factor * seasonality_factor
             
             # 3. Labor (Base)
             # Manager Cost
@@ -141,7 +174,6 @@ class FinancialModel:
             labor_seasonality = 1 + (seasonality_factor - 1) * 0.5
             store_labor = manager_mo_cost + (staff_cost_mo * labor_seasonality)
 
-            # 4. Store Ops Expenses (Base)
             # 4. Store Ops Expenses (Detailed)
             ex_util = self.utilities * exp_growth_factor
             ex_ins = self.insurance * exp_growth_factor
@@ -272,7 +304,7 @@ class FinancialModel:
             store_rent_expense += event_rent_impact
             
             # Prop Ops
-            prop_ops_expenses = event_prop_ops_impact
+            prop_ops_expenses = monthly_prop_tax + event_prop_ops_impact
             
             # --- PRE-BONUS NOI ---
             store_total_outflow_pre_bonus = store_cogs + store_labor + store_ops_expenses + store_rent_expense
@@ -289,12 +321,19 @@ class FinancialModel:
             prop_total_income = prop_comm_rent + prop_res_rent
             
             # Expenses
-            # Debt Service
-            prop_debt = monthly_debt_service
+            # Debt Service (Split Principal/Interest)
+            # Interest Payment
+            interest_payment = current_loan_balance * monthly_loan_rate
+            prop_debt_total = monthly_debt_service
+            principal_payment = prop_debt_total - interest_payment
             
-            # Prop Ops (calculated above from events)
+            # Update Balance
+            current_loan_balance -= principal_payment
+            if current_loan_balance < 0: current_loan_balance = 0
             
-            prop_net_cash = prop_total_income - prop_debt - prop_ops_expenses - event_capex_prop
+            # Prop Ops (calculated above from taxes + events)
+            
+            prop_net_cash = prop_total_income - prop_debt_total - prop_ops_expenses - event_capex_prop
 
             # --- CONSOLIDATED OWNER VIEW ---
             consolidated_cash = store_net_cash + prop_net_cash 
@@ -308,6 +347,13 @@ class FinancialModel:
             total_event_expense_impact = event_cogs_impact + event_labor_impact + event_ops_impact + event_rent_impact + event_prop_ops_impact
             total_event_capex = event_capex_store + event_capex_prop
             net_event_impact = event_rev_impact - total_event_expense_impact - total_event_capex
+
+            # Update Running Totals
+            cumulative_capex += total_event_capex
+            cash_balance += consolidated_cash # Drawdown or addition
+            
+            # Equity Calc
+            current_equity = current_property_value_period - current_loan_balance
 
             row_data = {
                 "Year": cal_year,
@@ -328,7 +374,8 @@ class FinancialModel:
                 "Ex_Prof": -ex_prof,
                 "Store_Rent_Ex": -store_rent_expense,
                 
-                "Prop_Debt": -prop_debt,
+                "Prop_Debt": -prop_debt_total,
+                "Prop_Tax": -monthly_prop_tax,
                 
                 "Store_Net": store_net_cash,
                 "Prop_Net": prop_net_cash,
@@ -338,9 +385,18 @@ class FinancialModel:
                 "Owner_Cum": cumulative_cash_owner,
                 "Owner_Cash_Flow": consolidated_cash,
                 
+                "Cash_Balance": cash_balance,
+                "Cum_Capex": cumulative_capex,
+                
                 "Capex": -total_event_capex,
                 "Net_Event_Impact": net_event_impact,
-                "Store_NOI_Pre": store_noi_pre_bonus
+                "Store_NOI_Pre": store_noi_pre_bonus,
+                
+                # New Balance Sheet Items
+                "Property_Value": current_property_value_period,
+                "Loan_Balance": current_loan_balance,
+                "Property_Equity": current_equity,
+                "Intangible_Assets": self.intangible_assets
             }
             
             # Merge event columns

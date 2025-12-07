@@ -12,8 +12,8 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     st.header("Financial Performance Dashboard")
     
     # --- TABS: INPUTS & DATA ---
-    tab_ops, tab_staff, tab_growth, tab_re, tab_events = st.tabs([
-        "⚙️ Operations", "👥 Staffing", "📈 Growth", "🏢 Real Estate", "✨ Events"
+    tab_acq, tab_re, tab_ops, tab_staff, tab_growth, tab_events = st.tabs([
+        "🤝 Acquisition", "🏢 Real Estate", "⚙️ Operations", "👥 Staffing", "📈 Growth", "✨ Events"
     ])
     
     # 1. Operations Tab
@@ -25,6 +25,7 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
             st.number_input("Utilities ($/mo)", step=50.0, key='util_monthly')
             st.number_input("Insurance ($/mo)", step=50.0, key='ins_monthly')
         with c2:
+            st.slider("Gross Profit Margin (%)", 0, 100, step=5, key='gross_margin_pct')
             st.number_input("Maintenance ($/mo)", step=50.0, key='maint_monthly')
             st.number_input("Marketing ($/mo)", step=50.0, key='mktg_monthly')
             st.number_input("Professional Fees ($/mo)", step=50.0, key='prof_monthly')
@@ -75,23 +76,89 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
              df_growth = df_projection.groupby('Year')[growth_cols[1:]].sum().reset_index()
              st.dataframe(df_growth.style.format("${:,.2f}", subset=growth_cols[1:]), use_container_width=True)
 
-    # 4. Real Estate Tab
-    with tab_re:
-        st.caption("Acquisition, Loans & Rent")
+    # 4. Acquisition Tab
+    with tab_acq:
+        st.caption("Startup Costs, Loan & Initial Equity")
         c1, c2 = st.columns(2)
         with c1:
              st.date_input("Acquisition Date", key='start_date')
-             st.number_input("Initial Capex ($)", step=1000.0, key='initial_capex')
-             st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
+             # Refactor: Total Price Input
+             st.number_input("Total Acquisition Price ($)", step=10000.0, key='acquisition_price', help="Total Purchase Price (RE + Assets)")
+             st.number_input("Intangible Asset Allocation ($)", step=5000.0, key='intangible_assets', help="Portion of Price for Licenses, Goodwill, etc.")
+             st.number_input("Closing Costs ($)", step=1000.0, key='closing_costs', help="Legal, Title, Fees (Reduces Cash)")
+             
+             # Feedback on RE Value
+             re_val = st.session_state['acquisition_price'] - st.session_state['intangible_assets']
+             st.caption(f"implied Real Estate Value: ${re_val:,.2f}")
+             
+             st.number_input("Initial Inventory ($)", step=1000.0, key='initial_inventory')
+             
         with c2:
+             st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
              st.number_input("Interest Rate (%)", step=0.1, format="%.2f", key='interest_rate')
              st.number_input("Amortization (Years)", step=1, key='amortization_years')
+             st.number_input("Startup Capital ($)", step=5000.0, key='initial_equity', help="Cash Injection from Owner")
+        
+        # Sources & Uses Summary
+        st.divider()
+        st.markdown("##### 💰 Sources & Uses Analysis")
+        
+        su_col1, su_col2 = st.columns(2)
+        
+        # Calculations
+        tot_sources = st.session_state['loan_amount'] + st.session_state['initial_equity']
+        
+        # Uses: Total Acquisition (RE + Intangibles) + Inventory + Closing Costs
+        tot_uses = st.session_state['acquisition_price'] + st.session_state['initial_inventory'] + st.session_state['closing_costs']
+        net_cash = tot_sources - tot_uses
+        
+        with su_col1:
+            st.markdown("**Uses of Funds**")
+            # Break down Acquisition
+            re_val_display = st.session_state['acquisition_price'] - st.session_state['intangible_assets']
+            
+            df_uses = pd.DataFrame([
+                {"Category": "Acquisition (Real Estate)", "Amount": re_val_display},
+                {"Category": "Acquisition (Intangibles)", "Amount": st.session_state['intangible_assets']},
+                {"Category": "Closing Costs", "Amount": st.session_state['closing_costs']},
+                {"Category": "Initial Inventory", "Amount": st.session_state['initial_inventory']},
+                {"Category": "TOTAL USES", "Amount": tot_uses}
+            ])
+            st.dataframe(df_uses.style.format("${:,.2f}", subset="Amount"), use_container_width=True, hide_index=True)
+            
+        with su_col2:
+            st.markdown("**Sources of Funds**")
+            df_sources = pd.DataFrame([
+                {"Category": "Bank Loan", "Amount": st.session_state['loan_amount']},
+                {"Category": "Owner Equity", "Amount": st.session_state['initial_equity']},
+                {"Category": "TOTAL SOURCES", "Amount": tot_sources}
+            ])
+            st.dataframe(df_sources.style.format("${:,.2f}", subset="Amount"), use_container_width=True, hide_index=True)
+            
+        if net_cash < 0:
+            st.error(f"⚠️ Funding Deficit (Negative Starting Cash): ${net_cash:,.2f}")
+        else:
+            st.success(f"✅ Starting Cash on Hand: ${net_cash:,.2f}")
+
+    # 5. Real Estate Tab
+    with tab_re:
+        st.caption("Property Operations & Income")
+        c1, c2 = st.columns(2)
+        with c1:
              st.number_input("Comm. Rent ($/mo)", step=100.0, key='rental_income_comm')
              st.number_input("Residential Rent ($/mo)", step=100.0, key='rental_income_res')
+        with c2:
+             st.number_input("Property Tax (Annual $)", step=500.0, key='property_tax_annual')
+             st.number_input("Appreciation Rate (%)", step=0.5, key='property_appreciation_rate')
              
         with st.expander("📄 Property Data", expanded=True):
-             prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Prop_Cum']
-             df_prop = df_projection.groupby('Year')[prop_cols[1:]].sum().reset_index()
+             # We will update these columns once model is updated
+             if 'Property_Equity' in df_projection.columns:
+                 prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Property_Value', 'Property_Equity']
+             else:
+                 prop_cols = ['Year', 'Prop_Net', 'Prop_Debt', 'Prop_Cum']
+             
+             df_prop = df_projection.groupby('Year')[prop_cols[1:]].apply(lambda x: x.iloc[-1] if x.name in ['Property_Value', 'Property_Equity', 'Prop_Cum'] else x.sum()).reset_index()
              st.dataframe(df_prop.style.format("${:,.2f}", subset=prop_cols[1:]), use_container_width=True)
 
     # 5. Events Tab
@@ -126,7 +193,17 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # Aggregation Logic (Shared)
     agg_dict = {
         'Store_Revenue': 'sum', 'Store_COGS': 'sum', 'Store_Labor': 'sum', 'Store_Ops_Ex': 'sum', 'Store_Net': 'sum',
-        'Prop_Net': 'sum', 'Owner_Cash_Flow': 'sum', 'Owner_Cum': 'last', 'EBITDA': 'sum'
+        'Prop_Net': 'sum', 'Owner_Cash_Flow': 'sum', 'Owner_Cum': 'last', 'EBITDA': 'sum',
+        'Cash_Balance': 'last', 'Cum_Capex': 'last'
+    }
+    
+    agg_dict = {
+        'Store_Revenue': 'sum', 'Store_COGS': 'sum', 'Store_Labor': 'sum', 'Store_Ops_Ex': 'sum', 'Store_Net': 'sum',
+        'Prop_Net': 'sum', 'Owner_Cash_Flow': 'sum', 'Owner_Cum': 'last', 'EBITDA': 'sum',
+        'Prop_Debt': 'sum', 'Prop_Tax': 'sum',
+        'Cash_Balance': 'last', 'Cum_Capex': 'last',
+        'Property_Value': 'last', 'Property_Equity': 'last', 'Intangible_Assets': 'last',
+        'Loan_Balance': 'last'
     }
     
     if aggregation == "Quarterly":
@@ -145,13 +222,52 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     st.metric(f"Total Owner Cash Flow ({time_horizon}y)", f"${total_cf:,.2f}")
     
     fig_owner = go.Figure()
+    
+    # 1. Bars: Periodic Cash Flow (Left Axis)
     fig_owner.add_trace(go.Bar(
         x=x_axis, y=df_display['Owner_Cash_Flow'], name='Periodic CF', 
-        marker_color='lightgreen', hovertemplate='$%{y:,.2f}<extra></extra>'
+        marker_color='lightgreen', hovertemplate='$%{y:,.2f}<extra></extra>',
+        offsetgroup=0
     ))
+    
+    # 2. Area: Physical Assets (Right Axis, Stack Group A)
+    # Renamed to "Other Assets (Capex)" for clarity if we have explicit Prop Equity
     fig_owner.add_trace(go.Scatter(
-        x=x_axis, y=df_display['Owner_Cum'], mode='lines', name='Cumulative', 
-        line=dict(color='darkgreen', width=3), yaxis='y2', 
+        x=x_axis, y=df_display['Cum_Capex'], mode='lines', name='Capex/Improv.', 
+        line=dict(color='orange', width=0), 
+        fill='tozeroy',
+        stackgroup='assets', # Stack with Cash
+        yaxis='y2',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    # 3. Area: Intangible Assets
+    fig_owner.add_trace(go.Scatter(
+        x=x_axis, y=df_display['Intangible_Assets'], mode='lines', name='Intangibles', 
+        line=dict(color='violet', width=0), 
+        fill='tonexty',
+        stackgroup='assets', 
+        yaxis='y2',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+
+    # 4. Area: Property Equity
+    fig_owner.add_trace(go.Scatter(
+        x=x_axis, y=df_display['Property_Equity'], mode='lines', name='Property Equity', 
+        line=dict(color='brown', width=0), 
+        fill='tonexty',
+        stackgroup='assets', 
+        yaxis='y2',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    # 5. Area: Cash on Hand (Right Axis, Stack Group A)
+    fig_owner.add_trace(go.Scatter(
+        x=x_axis, y=df_display['Cash_Balance'], mode='lines', name='Cash on Hand', 
+        line=dict(color='blue', width=0), 
+        fill='tonexty',
+        stackgroup='assets',
+        yaxis='y2', 
         hovertemplate='$%{y:,.2f}<extra></extra>'
     ))
     
@@ -160,7 +276,10 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
 
     # Calculate aligned ranges for dual axis
     y1_data = df_display['Owner_Cash_Flow']
-    y2_data = df_display['Owner_Cum']
+    
+    # Total Assets = Sum of all stacked items
+    total_assets = df_display['Cash_Balance'] + df_display['Cum_Capex'] + df_display['Property_Equity'] + df_display['Intangible_Assets']
+    y2_data = total_assets
     
     # Defaults
     y1_min, y1_max = y1_data.min(), y1_data.max()
@@ -172,69 +291,63 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     y2_max = max(0, y2_max * 1.1)
     y2_min = min(0, y2_min * 1.1)
 
-    # Calculate ratios (Top / Bottom)
-    # Avoid div by zero
-    y1_top = y1_max
-    y1_bot = abs(y1_min) if y1_min < 0 else 0
-    
-    y2_top = y2_max
-    y2_bot = abs(y2_min) if y2_min < 0 else 0
-    
-    # Determine the dominating ratio to fit both
-    # We want Top/Bot to be the same K for both.
-    # K must be >= max(K1, K2) to fit data.
-    
-    # Logic: 
-    # If both are all positive: Min is 0. Easy.
-    # If mixed:
-    # K1 = Top1 / Bot1
-    # K2 = Top2 / Bot2
-    # Target K = max(K1, K2)
-    # Then adjust the non-binding axis bounds.
-    
-    range1 = [y1_min, y1_max]
-    range2 = [y2_min, y2_max]
-    
-    if y1_bot > 0 and y2_bot > 0:
-        k1 = y1_top / y1_bot
-        k2 = y2_top / y2_bot
-        target_k = max(k1, k2)
-        
-        # Adjust Y1
-        if k1 < target_k:
-            # Need more top space
-            y1_max_new = y1_bot * target_k
-            range1 = [y1_min, y1_max_new]
-        
-        # Adjust Y2
-        if k2 < target_k:
-             y2_max_new = y2_bot * target_k
-             range2 = [y2_min, y2_max_new]
-             
-    elif y1_bot == 0 and y2_bot > 0:
-        # Y1 is all positive, Y2 is mixed.
-        # Zero line for Y2 is somewhere in middle.
-        # Zero line for Y1 is at bottom.
-        # To align, Y1 must extend down to match Y2's ratio.
-        # K2 = Top2 / Bot2.
-        # Y1 needs Bot1 such that Top1 / Bot1 = K2.
-        # Bot1 = Top1 / K2.
-        range1 = [-y1_top / (y2_top/y2_bot), y1_top]
-        
-    elif y1_bot > 0 and y2_bot == 0:
-        # Y2 all positive, Y1 mixed.
-        # Y2 needs space below.
-        range2 = [-y2_top / (y1_top/y1_bot), y2_top]
+    # Calculate ratios (Top / Bottom) & Align Axes
+    range1, range2 = _align_dual_axes(y1_min, y1_max, y2_min, y2_max)
 
     fig_owner.update_layout(
         yaxis=dict(title="Periodic Cash Flow", range=range1),
-        yaxis2=dict(title="Cumulative Cash Flow", overlaying='y', side='right', range=range2),
-        title=f"Owner Cash Flow: Periodic vs Cumulative ({aggregation})",
+        yaxis2=dict(title="Total Asset Value", overlaying='y', side='right', range=range2),
+        title=f"Cash Flow & Asset Value ({aggregation})",
         hovermode="x unified",
         height=400,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     st.plotly_chart(fig_owner, width="stretch", key="glob_chart_cf")
+
+    # 1.5 Capital Structure (Balance Sheet Visualization)
+    st.subheader("Capital Structure (Assets vs Debt)")
+    
+    # Calculate Components
+    # Assets (Positive)
+    asset_series = df_display['Cash_Balance'] + df_display['Cum_Capex'] + df_display['Property_Value'] + df_display['Intangible_Assets']
+    
+    # Debt (Negative)
+    debt_series = -df_display['Loan_Balance']
+    
+    # Equity (Net) = Assets + Debt (since debt is negative)
+    equity_series = asset_series + debt_series
+    
+    fig_cap = go.Figure()
+    
+    # Assets Bar
+    fig_cap.add_trace(go.Bar(
+        x=x_axis, y=asset_series, 
+        name='Total Assets', marker_color='forestgreen',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    # Debt Bar
+    fig_cap.add_trace(go.Bar(
+        x=x_axis, y=debt_series, 
+        name='Total Debt', marker_color='firebrick',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    # Equity Line
+    fig_cap.add_trace(go.Scatter(
+        x=x_axis, y=equity_series, 
+        name='Total Equity (Net Worth)', mode='lines+markers',
+        line=dict(color='gold', width=3),
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    fig_cap.update_layout(
+        title="Balance Sheet: Assets (Pos) + Debt (Neg) = Equity", 
+        barmode='relative', # Stacks positive and negative relative to 0
+        hovermode="x unified", 
+        legend=dict(orientation="h", y=1.1)
+    )
+    st.plotly_chart(fig_cap, width="stretch", key="glob_chart_cap_struct")
 
     # 2. Profitability Analysis (EBITDA vs Net)
     st.subheader("Profitability Trends")
@@ -253,30 +366,176 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     fig_ebitda.update_layout(title="EBITDA vs Net Profit", hovermode="x unified", legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_ebitda, width="stretch", key="glob_chart_ebitda")
 
-    # 3. Expense Stack & Profit
-    c_chart1, c_chart2 = st.columns(2)
+    # 3. Income & Expense Analysis (Combo Chart)
+    st.subheader("Income & Expense Breakdown")
+    fig_combo = go.Figure()
     
-    with c_chart1:
-        fig_stack = go.Figure()
-        fig_stack.add_trace(go.Bar(x=x_axis, y=df_display['Store_COGS'], name='COGS', hovertemplate='$%{y:,.2f}<extra></extra>'))
-        fig_stack.add_trace(go.Bar(x=x_axis, y=df_display['Store_Labor'], name='Labor', hovertemplate='$%{y:,.2f}<extra></extra>'))
-        fig_stack.add_trace(go.Bar(x=x_axis, y=df_display['Store_Ops_Ex'], name='Ops Expenses', hovertemplate='$%{y:,.2f}<extra></extra>'))
-        fig_stack.update_layout(barmode='stack', title="Expense Structure", legend=dict(orientation="h", y=-0.2))
-        st.plotly_chart(fig_stack, use_container_width=True)
-        
-    with c_chart2:
-        fig_prof = go.Figure()
-        fig_prof.add_trace(go.Scatter(x=x_axis, y=df_display['Store_Net'], name='Store Net', line=dict(color='blue'), hovertemplate='$%{y:,.2f}<extra></extra>'))
-        fig_prof.add_trace(go.Scatter(x=x_axis, y=df_display['Prop_Net'], name='Prop Net', line=dict(color='orange'), hovertemplate='$%{y:,.2f}<extra></extra>'))
-        fig_prof.update_layout(title="Net Profit by Entity", legend=dict(orientation="h", y=-0.2))
-        st.plotly_chart(fig_prof, use_container_width=True)
-        
-    # 4. Detailed Table (Restored)
+    # Revenue (Positive)
+    fig_combo.add_trace(go.Bar(
+        x=x_axis, y=df_display['Store_Revenue'], 
+        name='Revenue', marker_color='green',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    # Expenses (Negative)
+    # Stacked relative allows positive and negative to stack on respective sides of 0
+    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_COGS'], name='COGS', marker_color='lightblue', hovertemplate='$%{y:,.2f}<extra></extra>'))
+    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Labor'], name='Labor', marker_color='blue', hovertemplate='$%{y:,.2f}<extra></extra>'))
+    fig_combo.add_trace(go.Bar(x=x_axis, y=df_display['Store_Ops_Ex'], name='Ops Expenses', marker_color='pink', hovertemplate='$%{y:,.2f}<extra></extra>'))
+    
+    # Net Profit Line (Right Axis - y2)
+    # Calculated as Sum of all above (Rev + Expenses[neg])
+    # Which equals Store_Net in our model
+    fig_combo.add_trace(go.Scatter(
+        x=x_axis, y=df_display['Store_Net'], 
+        name='Net Profit', mode='lines+markers',
+        line=dict(color='black', width=3),
+        yaxis='y2',
+        hovertemplate='$%{y:,.2f}<extra></extra>'
+    ))
+    
+    # Custom Axis Alignment
+    # Axis 1 (Left): Measures Revenue and Expenses (Stacked Bars)
+    # Note: In 'relative' bar mode, the axis extent is determined by sum of pos/neg stacks.
+    # We need to compute the max positive stack and max negative stack per X to find range.
+    
+    # Simple approx: Max(Rev), Max(Abs(Expenses))
+    # Better: explicit stack sum
+    
+    # We can rely on matplotlib/plotly auto-range logic or calculate manually.
+    # To align zero, we MUST calculate manually.
+    
+    # Max Positive Stack = Revenue (easy, only one pos bar)
+    max_pos_stack = df_display['Store_Revenue'].max()
+    
+    # Max Negative Stack = Sum of COGS + Labor + Ops (all neg)
+    # All are negative numbers, so sum is min value.
+    df_display['Total_Exp_Stack'] = df_display['Store_COGS'] + df_display['Store_Labor'] + df_display['Store_Ops_Ex']
+    min_neg_stack = df_display['Total_Exp_Stack'].min()
+    
+    y1_range_min = min_neg_stack
+    y1_range_max = max_pos_stack
+    
+    # Axis 2 (Right): Net Profit line
+    y2_range_min = df_display['Store_Net'].min()
+    y2_range_max = df_display['Store_Net'].max()
+    
+    range1, range2 = _align_dual_axes(y1_range_min, y1_range_max, y2_range_min, y2_range_max)
+    
+    fig_combo.update_layout(
+        barmode='relative', 
+        title="Income, Expenses & Net Profit", 
+        hovermode="x unified",
+        legend=dict(orientation="h", y=1.1),
+        yaxis=dict(title="Revenue & Expenses", range=range1),
+        yaxis2=dict(title="Net Profit", overlaying='y', side='right', range=range2)
+    )
+    st.plotly_chart(fig_combo, width="stretch", key="glob_chart_income_exp")
+    
+    # 5. Pro Forma Financial Statements
     st.divider()
-    with st.expander("📄 Financial Model Source Data (Detailed)", expanded=False):
+    st.subheader("Pro Forma Financial Statements")
+    
+    # Generate Pro Forma DataFrame
+    df_pro_forma = _generate_pro_forma(df_display, x_axis)
+    
+    # Render
+    st.dataframe(df_pro_forma, use_container_width=True)
+
+    # 6. Financial Model Source Data (Detailed)
+    with st.expander("📄 Source Data (Raw Model Output)", expanded=False):
         # Format all float columns
         float_cols = [c for c in df_projection.columns if df_projection[c].dtype == 'float64']
         st.dataframe(df_projection.style.format("${:,.2f}", subset=float_cols), width="stretch")
+
+def _generate_pro_forma(df_agg, periods):
+    """
+    Constructs a standard Pro Forma Income Statement from aggregated data.
+    Rows: Metrics
+    Cols: Periods
+    """
+    # Initialize dictionary for rows
+    data = {}
+    
+    # 1. Income
+    # Store Revenue + Rental Income (Rental income is inside Prop_Net usually, but we need gross)
+    # The model outputs 'Prop_Net' which is Rent - Tax - Debt. 
+    # To get Gross Rent, we might need to back it out or check if we aggregated it.
+    # checking agg_dict... we didn't agg 'Gross_Rent' explicitly.
+    # However, 'Prop_Net' = Gross_Rent - Tax - Debt.
+    # So Gross_Rent = Prop_Net + Tax + Debt.
+    
+    # Note: df_agg values are sums (negative for expenses).
+    # Prop_Debt and Prop_Tax are negative numbers in the model output.
+    # So: Prop_Net = Gross_Rent + (Prop_Tax) + (Prop_Debt).
+    # Gross_Rent = Prop_Net - Prop_Tax - Prop_Debt.
+    
+    revenue_store = df_agg['Store_Revenue']
+    prop_net = df_agg['Prop_Net']
+    prop_tax = df_agg['Prop_Tax']
+    prop_debt = df_agg['Prop_Debt']
+    
+    revenue_rent = prop_net - prop_tax - prop_debt
+    
+    total_rev = revenue_store + revenue_rent
+    
+    data['Revenue (Operations)'] = revenue_store
+    data['Revenue (Real Estate)'] = revenue_rent
+    data['Total Revenue'] = total_rev
+    
+    # 2. COGS
+    # Store_COGS is negative
+    cogs = df_agg['Store_COGS']
+    data['COGS'] = cogs
+    
+    # 3. Gross Profit
+    # Rev + COGS (since COGS is neg)
+    gross_profit = total_rev + cogs
+    data['Gross Profit'] = gross_profit
+    
+    # 4. Operating Expenses
+    # Store Labor + Store Ops + Prop Tax
+    labor = df_agg['Store_Labor']
+    ops = df_agg['Store_Ops_Ex']
+    # Prop Tax
+    
+    total_opex = labor + ops + prop_tax
+    
+    data['Labor'] = labor
+    data['OpEx (Store)'] = ops
+    data['Property Tax'] = prop_tax
+    data['Total OpEx'] = total_opex
+    
+    # 5. NOI / EBITDA
+    noi = gross_profit + total_opex # (opex is neg)
+    data['Net Operating Income (NOI)'] = noi
+    
+    # 6. Debt Service
+    data['Debt Service'] = prop_debt
+    
+    # 7. Net Cash Flow
+    # NOI + Debt 
+    # (Capex is asset/equity move, usually below line for cash flow, but for Income Statement 'Net Income'...)
+    # Let's show Net Cash Flow (Pre-Tax)
+    ncf = noi + prop_debt
+    data['Net Cash Flow'] = ncf
+    
+    # Construct DF
+    df = pd.DataFrame(data)
+    
+    # Transpose: Rows = Metrics, Cols = Periods
+    df_t = df.T
+    df_t.columns = periods
+    
+    # Formatting helper
+    def fmt(x):
+        try:
+            return f"${x:,.0f}"
+        except:
+            return x
+            
+    return df_t.applymap(fmt)
+
 
 
 # --- HELPER FUNCTIONS ---
@@ -412,3 +671,56 @@ def _render_event_manager_ui():
                          st.session_state['events_data'].pop(i)
                          if st.session_state['edit_event_idx'] == i: st.session_state['edit_event_idx'] = None
                          st.rerun()
+
+def _align_dual_axes(y1_min, y1_max, y2_min, y2_max):
+    """
+    Calculates the ranges for two axes such that their zero lines align.
+    Returns (range1, range2).
+    """
+    # 1. Add headroom
+    y1_max = max(0, y1_max * 1.1)
+    y1_min = min(0, y1_min * 1.1)
+    y2_max = max(0, y2_max * 1.1)
+    y2_min = min(0, y2_min * 1.1)
+    
+    # 2. Defaults if no alignment needed (e.g. all positive)
+    range1 = [y1_min, y1_max]
+    range2 = [y2_min, y2_max]
+    
+    # 3. Calculate ratios (Top / Bottom)
+    y1_top = y1_max
+    y1_bot = abs(y1_min) if y1_min < 0 else 0
+    
+    y2_top = y2_max
+    y2_bot = abs(y2_min) if y2_min < 0 else 0
+    
+    # 4. Alignment Logic
+    if y1_bot > 0 and y2_bot > 0:
+        # Both have negative and positive
+        k1 = y1_top / y1_bot
+        k2 = y2_top / y2_bot
+        target_k = max(k1, k2)
+        
+        # Adjust Y1
+        if k1 < target_k:
+            y1_max_new = y1_bot * target_k
+            range1 = [y1_min, y1_max_new]
+        
+        # Adjust Y2
+        if k2 < target_k:
+             y2_max_new = y2_bot * target_k
+             range2 = [y2_min, y2_max_new]
+             
+    elif y1_bot == 0 and y2_bot > 0:
+        # Y1 all positive, Y2 mixed
+        # Scale Y1 down to match Y2's ratio
+        # Ratio K2 = Top2 / Bot2
+        # Y1 needs Bot1 such that Top1 / Bot1 = K2 => Bot1 = Top1 / K2
+        range1 = [-y1_top / (y2_top/y2_bot), y1_top]
+        
+    elif y1_bot > 0 and y2_bot == 0:
+        # Y2 all positive, Y1 mixed
+        # Scale Y2 down
+        range2 = [-y2_top / (y1_top/y1_bot), y2_top]
+        
+    return range1, range2

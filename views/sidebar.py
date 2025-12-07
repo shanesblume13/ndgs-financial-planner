@@ -3,8 +3,11 @@ import os
 import json
 import datetime
 import io
-from model import BusinessEvent, BASE_REVENUE_MONTHLY, BASE_COGS_PCT
+from model import BusinessEvent, BASE_REVENUE_MONTHLY
 from services.ai_service import ask_ai
+
+# Constants
+DEFAULT_PROPERTY_VALUE = 350000.0
 
 def initialize_session_state():
     # Core V1
@@ -13,6 +16,7 @@ def initialize_session_state():
     if 'manager_weekly_hours' not in st.session_state: st.session_state['manager_weekly_hours'] = 40.0
     if 'hourly_wage' not in st.session_state: st.session_state['hourly_wage'] = 12
     if 'avg_staff' not in st.session_state: st.session_state['avg_staff'] = 1.0
+    if 'gross_margin_pct' not in st.session_state: st.session_state['gross_margin_pct'] = 30.0
     if 'enable_fountain' not in st.session_state: st.session_state['enable_fountain'] = False
     if 'fountain_rev_daily' not in st.session_state: st.session_state['fountain_rev_daily'] = 150.0
     if 'enable_candy' not in st.session_state: st.session_state['enable_candy'] = False
@@ -20,9 +24,9 @@ def initialize_session_state():
 
     # Acquisition Defaults
     if 'loan_amount' not in st.session_state: st.session_state['loan_amount'] = 320000.0
-    if 'interest_rate' not in st.session_state: st.session_state['interest_rate'] = 7.0
+    if 'interest_rate' not in st.session_state: st.session_state['interest_rate'] = 8.0
     if 'amortization_years' not in st.session_state: st.session_state['amortization_years'] = 25
-    if 'rental_income_comm' not in st.session_state: st.session_state['rental_income_comm'] = 2000.0 # Split
+    if 'rental_income_comm' not in st.session_state: st.session_state['rental_income_comm'] = 1500.0 # Split
     if 'rental_income_res' not in st.session_state: st.session_state['rental_income_res'] = 1550.0 # Split
 
     # V2: Seasonality (Q1-Q4)
@@ -32,8 +36,8 @@ def initialize_session_state():
     if 'seasonality_q4' not in st.session_state: st.session_state['seasonality_q4'] = 1.1  # Holiday bump
 
     # V2: Growth
-    if 'rev_growth' not in st.session_state: st.session_state['rev_growth'] = 3.0 # 3% annual
-    if 'exp_growth' not in st.session_state: st.session_state['exp_growth'] = 2.0 # 2% annual
+    if 'rev_growth' not in st.session_state: st.session_state['rev_growth'] = 3.5 # 3.5% annual
+    if 'exp_growth' not in st.session_state: st.session_state['exp_growth'] = 2.5 # 2.5% annual
 
     # V2: Granular Expenses
     if 'util_monthly' not in st.session_state: st.session_state['util_monthly'] = 1200.0
@@ -44,16 +48,26 @@ def initialize_session_state():
 
     # V2: Growth Extras (New)
     if 'wage_growth' not in st.session_state: st.session_state['wage_growth'] = 3.0
-    if 'rent_escalation' not in st.session_state: st.session_state['rent_escalation'] = 2.0
+    if 'rent_escalation' not in st.session_state: st.session_state['rent_escalation'] = 4.0
 
-    # New: Initial Capex
-    if 'initial_capex' not in st.session_state: st.session_state['initial_capex'] = 50000.0
+    # New: Initial Capex & Equity
+    if 'initial_inventory' not in st.session_state: st.session_state['initial_inventory'] = 30000.0
+    if 'initial_equity' not in st.session_state: st.session_state['initial_equity'] = 150000.0
+    if 'intangible_assets' not in st.session_state: st.session_state['intangible_assets'] = 150000.0
+    if 'acquisition_price' not in st.session_state: st.session_state['acquisition_price'] = 400000.0 # Default total
+    # Legacy support / Derived state holder (optional, but good for safety)
+    if 'initial_property_value' not in st.session_state: st.session_state['initial_property_value'] = DEFAULT_PROPERTY_VALUE
+    if 'closing_costs' not in st.session_state: st.session_state['closing_costs'] = 10000.0
+
+    # Real Estate Expenses / Logic
+    if 'property_tax_annual' not in st.session_state: st.session_state['property_tax_annual'] = 6000.0
+    if 'property_appreciation_rate' not in st.session_state: st.session_state['property_appreciation_rate'] = 2.0
 
     # V2: Events
     if 'events' not in st.session_state: st.session_state['events'] = []
     
     # Phase 16: Date Management
-    if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date.today()
+    if 'start_date' not in st.session_state: st.session_state['start_date'] = datetime.date(2026, 1, 1)
 
 def render_sidebar():
     initialize_session_state()
@@ -61,7 +75,7 @@ def render_sidebar():
     # Placeholder for AI (Top of Sidebar)
     ai_container = st.sidebar.container()
     
-    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=False):
+    with st.sidebar.expander("📂 File Management (Export/Import)", expanded=True):
         st.write("Save your settings to a CSV file or restore from one.")
         
         # --- EXPORT ---
@@ -123,13 +137,16 @@ def render_sidebar():
                     # V1 & V2 keys
                     keys_to_load = [
                         'operating_hours', 'manager_wage_hourly', 'manager_weekly_hours', 'hourly_wage', 'avg_staff', 
-                        'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
+                        'gross_margin_pct', 'enable_fountain', 'fountain_rev_daily', 'enable_candy', 'candy_rev_daily',
                         'loan_amount', 'interest_rate', 'amortization_years',
                         'rental_income_res', 'rental_income_comm',
                         'seasonality_q1', 'seasonality_q2', 'seasonality_q3', 'seasonality_q4',
                         'rev_growth', 'exp_growth', 'wage_growth', 'rent_escalation',
                         'util_monthly', 'ins_monthly', 'maint_monthly', 'mktg_monthly', 'prof_monthly',
-                        'initial_capex'
+                        'initial_equity', 'initial_inventory',
+                        'initial_equity', 'initial_inventory',
+                        'intangible_assets', 'initial_property_value', 'closing_costs',
+                        'property_tax_annual', 'property_appreciation_rate'
                     ]
                     
                     for k in keys_to_load:
@@ -243,7 +260,7 @@ def get_model_config():
         "wage_growth_rate": st.session_state['wage_growth'],
         "rent_escalation_rate": st.session_state['rent_escalation'],
         "base_revenue": BASE_REVENUE_MONTHLY,
-        "base_cogs_pct": BASE_COGS_PCT,
+        "gross_margin_pct": st.session_state['gross_margin_pct'],
         
         "operating_hours": st.session_state['operating_hours'],
         "manager_wage_hourly": st.session_state['manager_wage_hourly'],
@@ -263,7 +280,15 @@ def get_model_config():
         "commercial_rent_income": st.session_state['rental_income_comm'],
         "residential_rent_income": st.session_state['rental_income_res'],
         
-        "initial_capex": st.session_state['initial_capex'],
+        "initial_equity": st.session_state['initial_equity'],
+        "initial_inventory": st.session_state['initial_inventory'],
+        "intangible_assets": st.session_state['intangible_assets'],
+        "closing_costs": st.session_state['closing_costs'],
+        # Derived: Property Value = Total Price - Intangibles
+        "initial_property_value": st.session_state['acquisition_price'] - st.session_state['intangible_assets'],
+        
+        "property_tax_annual": st.session_state['property_tax_annual'],
+        "property_appreciation_rate": st.session_state['property_appreciation_rate'],
 
         "start_date": st.session_state['start_date'],
         

@@ -7,7 +7,7 @@ import pandas as pd
 # Add parent directory to path to import app modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model import FinancialModel, BusinessEvent, calculate_monthly_payment, BASE_REVENUE_MONTHLY, BASE_COGS_PCT
+from model import FinancialModel, BusinessEvent, calculate_monthly_payment, BASE_REVENUE_MONTHLY
 
 class TestFinancialLogic(unittest.TestCase):
 
@@ -20,7 +20,7 @@ class TestFinancialLogic(unittest.TestCase):
             "wage_growth_rate": 0.0,
             "rent_escalation_rate": 0.0,
             "base_revenue": 10000.0, # Simple number
-            "base_cogs_pct": 0.50,
+            "gross_margin_pct": 50.0, # 50% Margin -> 50% COGS
             "operating_hours": 10,
             "manager_wage_hourly": 20.0, # 20/hr
             "manager_weekly_hours": 10.0, # 10 hrs/week -> ~43.33 hrs/mo -> Cost: 866.66
@@ -35,9 +35,18 @@ class TestFinancialLogic(unittest.TestCase):
             "loan_amount": 100000.0,
             "interest_rate": 0.0, # Simplify Debt
             "amortization_years": 10,
-            "initial_capex": 50000.0,
+            "initial_inventory": 0.0,
+            "initial_equity": 200000.0,
+            
+            "intangible_assets": 200000.0,
+            "initial_property_value": 100000.0, # Match loan for simplicity in base test
+            "closing_costs": 0.0, # Default for tests
+            
             "commercial_rent_income": 1000.0,
             "residential_rent_income": 500.0,
+            
+            "property_tax_annual": 0.0, # Simplify base test
+            "property_appreciation_rate": 0.0,
             # Events
             "events": []
         }
@@ -337,6 +346,57 @@ class TestFinancialLogic(unittest.TestCase):
         # Verify Month 5 (May) has no bonus (Quarterly freq)
         m5_pos = df_pos.iloc[4]
         self.assertAlmostEqual(m5_pos['Store_Labor'], -base_labor_expected, places=1)
+
+    def test_property_metrics(self):
+        """Verify Property Tax, Equity, and Appreciation logic"""
+        inputs = self.default_inputs.copy()
+        inputs['property_tax_annual'] = 1200.0 # 100/mo
+        inputs['initial_property_value'] = 200000.0
+        inputs['loan_amount'] = 150000.0
+        inputs['initial_equity'] = 100000.0 # Cash
+        inputs['property_appreciation_rate'] = 10.0 # 10% annual
+        inputs['intangible_assets'] = 10000.0
+        inputs['initial_inventory'] = 5000.0
+        
+        # Start:
+        # Downpayment = 200k - 150k = 50k.
+        # Startup Uses = 5k(Inv) + 10k(Intangible) + 50k(Down) = 65k.
+        # Initial Cash Balance = 100k - 65k = 35k.
+        
+        model = FinancialModel(**inputs)
+        df = model.calculate_projection(start_date=datetime.date(2024, 1, 1), months=13)
+        
+        m1 = df.iloc[0]
+        m13 = df.iloc[12] # Year 2 Month 1
+        
+        # 1. Cash Balance check
+        # M1 Cash Balance = Initial(25k) + M1_Cash_Flow
+        # We need to calc M1 Cash Flow roughly.
+        # Store Net approx: 10k(Rev) - 5k(COGS) - ~3k(Labor) - 500(Ops) - 1000(Rent) = 500.
+        # Prop Net: 1000+500 - Debt(150k/10y/0int = 1250) - Tax(100) = 150.
+        # Consolidated = 650.
+        # Balance ~ 35000 + 650 = 35650.
+        self.assertAlmostEqual(m1['Cash_Balance'], 35000.0 + m1['Owner_Cash_Flow'], places=1)
+        
+        # 2. Property Tax
+        self.assertEqual(m1['Prop_Tax'], -100.0)
+        
+        # 3. Equity
+        # M1: Prop Value = 200,000 (Growth applied at YEAR index, so Year 1 is 1.0)
+        # Loan Balance: 150,000 - Principal Payment (1250).
+        # Equity = 200,000 - 148,750 = 51,250.
+        principal_pay = 150000.0 / 120.0
+        self.assertAlmostEqual(m1['Loan_Balance'], 150000.0 - principal_pay, places=2)
+        self.assertAlmostEqual(m1['Property_Equity'], 200000.0 - (150000.0 - principal_pay), places=2)
+        
+        # 4. Appreciation (Year 2)
+        # Year 2 Index = 1.
+        # Factor = (1.10)^1 = 1.10.
+        # Value = 220,000.
+        self.assertAlmostEqual(m13['Property_Value'], 220000.0, places=1)
+        
+        # 5. Intangibles
+        self.assertEqual(m1['Intangible_Assets'], 10000.0)
 
 if __name__ == '__main__':
     unittest.main()
