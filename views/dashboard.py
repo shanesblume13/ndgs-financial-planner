@@ -49,17 +49,18 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 1. Operations Tab
     with tab_ops:
         st.caption("Operating Expenses & Fixed Costs")
-        c1, c2 = st.columns(2)
-        with c1:
-            st.number_input("Base Annual Revenue ($)", min_value=100000.0, step=10000.0, key='base_annual_revenue', help="Starting baseline before growth & seasonality")
-            st.slider("Daily Operating Hours", 6, 24, key='operating_hours')
-            st.number_input("Utilities ($/mo)", step=50.0, key='util_monthly')
-            st.number_input("Insurance ($/mo)", step=50.0, key='ins_monthly')
-        with c2:
-            st.slider("Gross Profit Margin (%)", 0, 100, step=5, key='gross_margin_pct')
-            st.number_input("Maintenance ($/mo)", step=50.0, key='maint_monthly')
-            st.number_input("Marketing ($/mo)", step=50.0, key='mktg_monthly')
-            st.number_input("Professional Fees ($/mo)", step=50.0, key='prof_monthly')
+        with st.expander("Settings", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.number_input("Base Annual Revenue ($)", min_value=100000.0, step=10000.0, key='base_annual_revenue', help="Starting baseline before growth & seasonality")
+                st.slider("Daily Operating Hours", 6, 24, key='operating_hours')
+                st.number_input("Utilities ($/mo)", step=50.0, key='util_monthly')
+                st.number_input("Insurance ($/mo)", step=50.0, key='ins_monthly')
+            with c2:
+                st.slider("Gross Profit Margin (%)", 0, 100, step=5, key='gross_margin_pct')
+                st.number_input("Maintenance ($/mo)", step=50.0, key='maint_monthly')
+                st.number_input("Marketing ($/mo)", step=50.0, key='mktg_monthly')
+                st.number_input("Professional Fees ($/mo)", step=50.0, key='prof_monthly')
             
         with st.expander("📄 Operating Data", expanded=True):
              # Filter cols for Ops
@@ -76,16 +77,17 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 2. Staffing Tab
     with tab_staff:
         st.caption("Labor, Wages & Management")
-        c1, c2 = st.columns(2)
-        with c1:
-             st.slider("Avg Staff on Shift", 1.0, 5.0, 1.0, step=0.5, key='avg_staff')
-             st.slider("Hourly Staff Wage ($/hr)", 10, 30, key='hourly_wage')
-             st.slider("Wage Growth (%)", 0.0, 10.0, key='wage_growth')
-        with c2:
-             st.slider("Manager Hourly Wage ($/hr)", 12.0, 50.0, 0.5, key='manager_wage_hourly')
-             st.slider("Manager Weekly Hours", 0, 60, 1, key='manager_weekly_hours')
-             mgr_annual = st.session_state['manager_wage_hourly'] * st.session_state['manager_weekly_hours'] * 52
-             st.caption(f"Est. Manager Annual: ${mgr_annual:,.2f}")
+        with st.expander("Settings", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                 st.slider("Avg Staff on Shift", 1.0, 5.0, step=0.5, key='avg_staff')
+                 st.slider("Hourly Staff Wage ($/hr)", 10, 30, key='hourly_wage')
+                 st.slider("Wage Growth (%)", 0.0, 10.0, key='wage_growth')
+            with c2:
+                 st.slider("Manager Hourly Wage ($/hr)", 12.0, 50.0, step=0.5, key='manager_wage_hourly')
+                 st.slider("Manager Weekly Hours", 0, 60, key='manager_weekly_hours')
+                 mgr_annual = st.session_state['manager_wage_hourly'] * st.session_state['manager_weekly_hours'] * 52
+                 st.caption(f"Est. Manager Annual: ${mgr_annual:,.2f}")
              
         with st.expander("📄 Staffing Data", expanded=True):
              lab_cols = ['Year', 'Store_Labor']
@@ -99,17 +101,18 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 3. Growth Tab
     with tab_growth:
          st.caption("Revenue Growth, Inflation & Seasonality")
-         c1, c2 = st.columns(2)
-         with c1:
-            st.slider("Revenue Growth (%)", -5.0, 10.0, key='rev_growth')
-            st.slider("Expense Inflation (%)", -5.0, 10.0, key='exp_growth')
-            st.slider("Rent Escalation (%)", 0.0, 10.0, key='rent_escalation')
-         with c2:
-            st.markdown("##### Seasonality Factors")
-            st.slider("Q1 (Winter)", 0.5, 1.5, key='seasonality_q1')
-            st.slider("Q2 (Spring)", 0.5, 1.5, key='seasonality_q2')
-            st.slider("Q3 (Summer)", 0.5, 1.5, key='seasonality_q3')
-            st.slider("Q4 (Fall)", 0.5, 1.5, key='seasonality_q4')
+         with st.expander("Settings", expanded=False):
+             c1, c2 = st.columns(2)
+             with c1:
+                st.slider("Revenue Growth (%)", -5.0, 10.0, key='rev_growth')
+                st.slider("Expense Inflation (%)", -5.0, 10.0, key='exp_growth')
+                st.slider("Rent Escalation (%)", 0.0, 10.0, key='rent_escalation')
+             with c2:
+                st.markdown("##### Seasonality Factors")
+                st.slider("Q1 (Winter)", 0.5, 1.5, key='seasonality_q1')
+                st.slider("Q2 (Spring)", 0.5, 1.5, key='seasonality_q2')
+                st.slider("Q3 (Summer)", 0.5, 1.5, key='seasonality_q3')
+                st.slider("Q4 (Fall)", 0.5, 1.5, key='seasonality_q4')
             
          with st.expander("📄 Growth Data", expanded=True):
              growth_cols = ['Year', 'Store_Revenue', 'Store_COGS']
@@ -123,25 +126,26 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 4. Acquisition Tab
     with tab_acq:
         st.caption("Startup Costs, Loan & Initial Equity")
-        c1, c2 = st.columns(2)
-        with c1:
-             st.date_input("Acquisition Date", key='start_date')
-             # Refactor: Total Price Input
-             st.number_input("Total Acquisition Price ($)", step=10000.0, key='acquisition_price', help="Total Purchase Price (RE + Assets)")
-             st.number_input("Intangible Asset Allocation ($)", step=5000.0, key='intangible_assets', help="Portion of Price for Licenses, Goodwill, etc.")
-             st.number_input("Closing Costs ($)", step=1000.0, key='closing_costs', help="Legal, Title, Fees (Reduces Cash)")
-             
-             # Feedback on RE Value
-             re_val = st.session_state['acquisition_price'] - st.session_state['intangible_assets']
-             st.caption(f"implied Real Estate Value: ${re_val:,.2f}")
-             
-             st.number_input("Initial Inventory ($)", step=1000.0, key='initial_inventory')
-             
-        with c2:
-             st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
-             st.number_input("Interest Rate (%)", step=0.1, format="%.2f", key='interest_rate')
-             st.number_input("Amortization (Years)", step=1, key='amortization_years')
-             st.number_input("Startup Capital ($)", step=5000.0, key='initial_equity', help="Cash Injection from Owner")
+        with st.expander("Settings", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                 st.date_input("Acquisition Date", key='start_date')
+                 # Refactor: Total Price Input
+                 st.number_input("Total Acquisition Price ($)", step=10000.0, key='acquisition_price', help="Total Purchase Price (RE + Assets)")
+                 st.number_input("Intangible Asset Allocation ($)", step=5000.0, key='intangible_assets', help="Portion of Price for Licenses, Goodwill, etc.")
+                 st.number_input("Closing Costs ($)", step=1000.0, key='closing_costs', help="Legal, Title, Fees (Reduces Cash)")
+                 
+                 # Feedback on RE Value
+                 re_val = st.session_state['acquisition_price'] - st.session_state['intangible_assets']
+                 st.caption(f"implied Real Estate Value: ${re_val:,.2f}")
+                 
+                 st.number_input("Initial Inventory ($)", step=1000.0, key='initial_inventory')
+                 
+            with c2:
+                 st.number_input("Loan Amount ($)", step=1000.0, key='loan_amount')
+                 st.number_input("Interest Rate (%)", step=0.1, format="%.2f", key='interest_rate')
+                 st.number_input("Amortization (Years)", step=1, key='amortization_years')
+                 st.number_input("Startup Capital ($)", step=5000.0, key='initial_equity', help="Cash Injection from Owner")
         
         # Sources & Uses Summary
         st.divider()
@@ -187,13 +191,14 @@ def render_dashboard(df_projection, model_events, inputs_summary, start_date=Non
     # 5. Real Estate Tab
     with tab_re:
         st.caption("Property Operations & Income")
-        c1, c2 = st.columns(2)
-        with c1:
-             st.number_input("Comm. Rent ($/mo)", step=100.0, key='rental_income_comm')
-             st.number_input("Residential Rent ($/mo)", step=100.0, key='rental_income_res')
-        with c2:
-             st.number_input("Property Tax (Annual $)", step=500.0, key='property_tax_annual')
-             st.number_input("Appreciation Rate (%)", step=0.5, key='property_appreciation_rate')
+        with st.expander("Settings", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                 st.number_input("Comm. Rent ($/mo)", step=100.0, key='rental_income_comm')
+                 st.number_input("Residential Rent ($/mo)", step=100.0, key='rental_income_res')
+            with c2:
+                 st.number_input("Property Tax (Annual $)", step=500.0, key='property_tax_annual')
+                 st.number_input("Appreciation Rate (%)", step=0.5, key='property_appreciation_rate')
              
         with st.expander("📄 Property Data", expanded=True):
              # We will update these columns once model is updated
